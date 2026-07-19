@@ -364,10 +364,12 @@ def train_oscillator_model(primary_predictor, data, ohlcv_df):
     # The oscillator test data aligns with the END of the dataset
     test_dates = ohlcv_df.index[-len(test_signals):]
     actual_test_prices = ohlcv_df['Close'].values[-len(test_signals):]
+    predicted_test_prices = decode_quaternion_to_price(osc_data["X_q_test"], data["scaler"])
     
     plot_oscillator_signals(
         test_dates, 
-        actual_test_prices, 
+        actual_test_prices,
+        predicted_test_prices,
         test_signals, 
         title_suffix="(Test Set)"
     )

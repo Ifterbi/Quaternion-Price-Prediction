@@ -219,6 +219,7 @@ def plot_results(
 def plot_oscillator_signals(
     dates: pd.DatetimeIndex,
     actual_prices: np.ndarray,
+    predicted_prices: np.ndarray,
     signals: np.ndarray,
     title_suffix: str = ""
 ):
@@ -227,6 +228,7 @@ def plot_oscillator_signals(
     Args:
         dates: DatetimeIndex for the x-axis.
         actual_prices: Array of actual prices.
+        predicted_prices: Array of predicted prices from the primary model.
         signals: Array of oscillator signals in [-1, 1].
         title_suffix: Optional suffix for the plot title.
     """
@@ -234,20 +236,21 @@ def plot_oscillator_signals(
 
     color1 = 'black'
     ax1.set_xlabel('Date', fontsize=12)
-    ax1.set_ylabel('Actual Price (AUD/USD)', color=color1, fontsize=12)
+    ax1.set_ylabel('Price (AUD/USD)', color=color1, fontsize=12)
     ax1.plot(dates, actual_prices, color=color1, label='Actual Price', linewidth=2)
+    ax1.plot(dates, predicted_prices, color='blue', label='Predicted Price', linewidth=1.5, linestyle='--')
     ax1.tick_params(axis='y', labelcolor=color1)
     ax1.grid(True, alpha=0.3)
 
     ax2 = ax1.twinx()
     color2 = 'purple'
     ax2.set_ylabel('Oscillator Signal [-1, 1]', color=color2, fontsize=12)
-    ax2.plot(dates, signals, color=color2, label='Valuation Signal', alpha=0.7, linestyle='--')
+    ax2.plot(dates, signals, color=color2, label='Valuation Signal', alpha=0.7, linestyle='-')
     ax2.axhline(y=0, color='gray', linestyle=':', alpha=0.8)
     
-    # Highlight over/undervalued zones
-    ax2.fill_between(dates, 0.5, 1.0, color='red', alpha=0.1)
-    ax2.fill_between(dates, -1.0, -0.5, color='green', alpha=0.1)
+    # Highlight over/undervalued zones based on the signal
+    ax2.fill_between(dates, 0, signals.flatten(), where=(signals.flatten() > 0), color='red', alpha=0.2, label='Overvalued (Sell Zone)')
+    ax2.fill_between(dates, 0, signals.flatten(), where=(signals.flatten() < 0), color='green', alpha=0.2, label='Undervalued (Buy Zone)')
     
     ax2.set_ylim(-1.1, 1.1)
     ax2.tick_params(axis='y', labelcolor=color2)
