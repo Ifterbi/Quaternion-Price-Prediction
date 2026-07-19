@@ -11,11 +11,11 @@ import os
 # ──────────────────────────────────────────────
 # Ticker / data settings
 # ──────────────────────────────────────────────
-TICKER_PRIMARY: str = "SNDL"
-"""Primary ticker symbol to fetch from Yahoo Finance."""
+TICKER_PRIMARY: str = "F"
+"""Primary ticker symbol to fetch from Yahoo Finance. (Ford Motor Co)"""
 
-TICKER_FALLBACK: str = "ZOM"
-"""Fallback ticker if the primary is unavailable."""
+TICKER_FALLBACK: str = "CAT"
+"""Fallback ticker if the primary is unavailable. (Caterpillar Inc)"""
 
 DEFAULT_START_DATE: str = "2026-05-25"
 """Earliest date for historical data retrieval (YYYY-MM-DD). yfinance limits 5m data to 60 days."""
