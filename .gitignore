@@ -1,0 +1,14 @@
+# Python environments
+.venv/
+env/
+venv/
+__pycache__/
+*.pyc
+
+# Project data and outputs
+cached_data/
+saved_models/
+visualizations/
+
+# System files
+.DS_Store
