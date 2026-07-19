@@ -248,9 +248,21 @@ def plot_oscillator_signals(
     ax2.plot(dates, signals, color=color2, label='Valuation Signal', alpha=0.7, linestyle='-')
     ax2.axhline(y=0, color='gray', linestyle=':', alpha=0.8)
     
-    # Highlight over/undervalued zones based on the signal
-    ax2.fill_between(dates, 0, signals.flatten(), where=(signals.flatten() > 0), color='red', alpha=0.2, label='Overvalued (Sell Zone)')
-    ax2.fill_between(dates, 0, signals.flatten(), where=(signals.flatten() < 0), color='green', alpha=0.2, label='Undervalued (Buy Zone)')
+    # Highlight over/undervalued zones based on the signal across the entire vertical axis
+    ax1.fill_between(
+        dates, 0, 1, 
+        where=(signals.flatten() > 0), 
+        color='red', alpha=0.1, 
+        label='Overvalued (Sell Zone)', 
+        transform=ax1.get_xaxis_transform()
+    )
+    ax1.fill_between(
+        dates, 0, 1, 
+        where=(signals.flatten() < 0), 
+        color='green', alpha=0.1, 
+        label='Undervalued (Buy Zone)', 
+        transform=ax1.get_xaxis_transform()
+    )
     
     ax2.set_ylim(-1.1, 1.1)
     ax2.tick_params(axis='y', labelcolor=color2)
