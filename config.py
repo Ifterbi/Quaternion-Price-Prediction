@@ -11,26 +11,26 @@ import os
 # ──────────────────────────────────────────────
 # Ticker / data settings
 # ──────────────────────────────────────────────
-TICKER_PRIMARY: str = "BTC-AUD"
+TICKER_PRIMARY: str = "SNDL"
 """Primary ticker symbol to fetch from Yahoo Finance."""
 
-TICKER_FALLBACK: str = "BTC-USD"
+TICKER_FALLBACK: str = "ZOM"
 """Fallback ticker if the primary is unavailable."""
 
-DEFAULT_START_DATE: str = "2020-01-01"
-"""Earliest date for historical data retrieval (YYYY-MM-DD)."""
+DEFAULT_START_DATE: str = "2026-05-25"
+"""Earliest date for historical data retrieval (YYYY-MM-DD). yfinance limits 5m data to 60 days."""
 
 DEFAULT_END_DATE: str | None = None
 """End date for data retrieval.  ``None`` means 'today'."""
 
-DEFAULT_INTERVAL: str = "1d"
-"""Candlestick interval (e.g. '1d', '1h')."""
+DEFAULT_INTERVAL: str = "5m"
+"""Candlestick interval (e.g. '1d', '5m')."""
 
 # ──────────────────────────────────────────────
 # Sequence / feature dimensions
 # ──────────────────────────────────────────────
-SEQUENCE_LENGTH: int = 60
-"""Number of time-steps in each input sequence."""
+SEQUENCE_LENGTH: int = 78
+"""Number of time-steps in each input sequence. (78 is 1 trading day of 5m candles)"""
 
 N_FEATURES: int = 4
 """Number of quaternion components per time-step (w, x, y, z)."""
