@@ -17,20 +17,20 @@ TICKER_PRIMARY: str = "F"
 TICKER_FALLBACK: str = "CAT"
 """Fallback ticker if the primary is unavailable. (Caterpillar Inc)"""
 
-DEFAULT_START_DATE: str = "2026-05-25"
-"""Earliest date for historical data retrieval (YYYY-MM-DD). yfinance limits 5m data to 60 days."""
+DEFAULT_START_DATE: str = "2020-01-01"
+"""Earliest date for historical data retrieval (YYYY-MM-DD)."""
 
 DEFAULT_END_DATE: str | None = None
 """End date for data retrieval.  ``None`` means 'today'."""
 
-DEFAULT_INTERVAL: str = "5m"
+DEFAULT_INTERVAL: str = "1d"
 """Candlestick interval (e.g. '1d', '5m')."""
 
 # ──────────────────────────────────────────────
 # Sequence / feature dimensions
 # ──────────────────────────────────────────────
-SEQUENCE_LENGTH: int = 78
-"""Number of time-steps in each input sequence. (78 is 1 trading day of 5m candles)"""
+SEQUENCE_LENGTH: int = 60
+"""Number of time-steps in each input sequence. (60 is roughly 3 months of daily candles)"""
 
 N_FEATURES: int = 4
 """Number of quaternion components per time-step (w, x, y, z)."""
