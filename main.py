@@ -466,9 +466,13 @@ def main(train: bool = TRAIN_ON_RUN, epochs: int = config.EPOCHS, model_type: st
     print(f"  Training samples:  {data['encoding_info']['train_samples']}")
     print(f"  Test samples:      {data['encoding_info']['test_samples']}")
     print(f"  Model parameters:  {predictor.model.count_params():,}")
-    if config.DUAL_STREAM:
+    if getattr(predictor, "dual_stream", False):
         print(f"  Architecture:      Dual-Stream ({config.FUSION_STRATEGY.upper()} fusion)")
         print(f"  Context dropout:   {config.CONTEXT_DROPOUT_RATE:.0%}")
+    elif model_type == "mtl":
+        print(f"  Architecture:      Multi-Task Learning (MTL)")
+    else:
+        print(f"  Architecture:      Single-Stream LSTM")
     print()
 
 
