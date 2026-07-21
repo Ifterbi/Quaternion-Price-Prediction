@@ -29,8 +29,7 @@ from quaternion_encoder import (
     compute_residuals,
     prepare_oscillator_data,
 )
-from lstm_model import QuaternionLSTMPredictor
-from mtl_model import MultiTaskQuaternionPredictor
+from model_factory import build_primary_model
 from signal_model import ResidualOscillator
 from model_analysis import (
     simulate_autoregressive,
@@ -156,32 +155,7 @@ def build_model(model_type="lstm"):
     print(f"  Step 5: Building {'Dual-Stream' if use_dual else 'Single-Stream'} {model_type.upper()} Model")
     print("=" * 60)
 
-    if model_type == "mtl":
-        predictor = MultiTaskQuaternionPredictor(
-            sequence_length=config.SEQUENCE_LENGTH,
-            n_features=config.N_FEATURES,
-            lstm_units=config.LSTM_UNITS,
-            aux_dense_units=16,
-            dropout_rate=config.DROPOUT_RATE,
-            learning_rate=config.LEARNING_RATE,
-        )
-    else:
-        predictor = QuaternionLSTMPredictor(
-            sequence_length=config.SEQUENCE_LENGTH,
-            n_features=config.N_FEATURES,
-            lstm_units=config.LSTM_UNITS,
-            dense_units=config.DENSE_UNITS,
-            dropout_rate=config.DROPOUT_RATE,
-            learning_rate=config.LEARNING_RATE,
-            output_size=config.N_FEATURES,
-            dual_stream=use_dual,
-            n_context_features=config.N_CONTEXT_FEATURES if use_dual else 5,
-            context_lstm_units=config.CONTEXT_LSTM_UNITS if use_dual else 32,
-            fusion_strategy=config.FUSION_STRATEGY if use_dual else "film",
-            fusion_dense_units=config.FUSION_DENSE_UNITS if use_dual else 48,
-            context_dropout_rate=config.CONTEXT_DROPOUT_RATE if use_dual else 0.15,
-        )
-    predictor.build_model()
+    predictor = build_primary_model(model_type)
 
     print(f"\n  Model Summary:")
     print(f"  {'-' * 50}")
