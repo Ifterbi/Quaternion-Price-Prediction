@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Quaternion AI Predictor — Advanced LSTM price prediction dashboard with dual-stream architecture and residual oscillator signals.">
     <title>Quaternion AI Predictor</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='4' y='26' font-size='28'>◆</text></svg>">
 </head>
 <body>
@@ -87,11 +87,15 @@
                 <!-- Price Chart -->
                 <div class="card" id="chart-card">
                     <div class="card-header">
-                        <h3>Price Prediction Overlay</h3>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <h3>Price Prediction Overlay</h3>
+                            <div class="model-pills-container" id="model-pills-container">
+                                <!-- Pills will be dynamically injected here -->
+                            </div>
+                        </div>
                         <div class="chart-controls">
                             <button class="btn btn-sm btn-secondary" id="btn-reset-zoom" title="Reset zoom">⟲ Reset Zoom</button>
                             <button class="btn btn-sm btn-secondary" id="btn-toggle-actual" title="Toggle actual prices">Actual</button>
-                            <button class="btn btn-sm btn-secondary" id="btn-toggle-predicted" title="Toggle predicted prices">Predicted</button>
                             <button class="btn btn-sm btn-secondary" id="btn-toggle-signal" title="Toggle oscillator signal">Signal</button>
                             <span style="color: rgba(255,255,255,0.2);">|</span>
                             <button class="btn btn-sm btn-secondary" id="btn-toggle-draw" title="Draw Trendline">✏️ Draw</button>
@@ -105,18 +109,26 @@
                 </div>
 
                 <!-- Error Metrics -->
-                <div class="grid-3" id="error-metrics-row" style="margin-top: 20px;">
-                    <div class="card metric-card">
-                        <div class="metric-label">MAE</div>
-                        <div class="metric-value metric-small" id="metric-mae-detail">—</div>
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h3>Comparative Error Metrics</h3>
                     </div>
-                    <div class="card metric-card">
-                        <div class="metric-label">RMSE</div>
-                        <div class="metric-value metric-small" id="metric-rmse">—</div>
-                    </div>
-                    <div class="card metric-card">
-                        <div class="metric-label">MAPE</div>
-                        <div class="metric-value metric-small" id="metric-mape">—</div>
+                    <div class="table-responsive">
+                        <table class="metrics-table">
+                            <thead>
+                                <tr>
+                                    <th>Model Name</th>
+                                    <th>MAE</th>
+                                    <th>RMSE</th>
+                                    <th>MAPE</th>
+                                </tr>
+                            </thead>
+                            <tbody id="metrics-table-body">
+                                <tr>
+                                    <td colspan="4" class="text-muted" style="text-align: center;">No models plotted</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -505,7 +517,7 @@
     <script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
 
     <!-- Application script -->
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2"></script>
 
 </body>
 </html>

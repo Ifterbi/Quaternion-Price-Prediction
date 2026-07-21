@@ -19,7 +19,7 @@ import importlib
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import numpy as np
 import pandas as pd
@@ -350,7 +350,7 @@ async def search_ticker(q: str = Query(..., min_length=1)):
 # ── Inference / Data Endpoint ─────────────────
 
 @app.get("/api/data")
-async def get_prediction_data():
+async def get_prediction_data(models: List[str] = Query(default=[])):
     """Run full inference pipeline and return prediction data for charts."""
     try:
         # 1. Fetch OHLCV data
@@ -361,101 +361,161 @@ async def get_prediction_data():
             interval=config.DEFAULT_INTERVAL,
         ))
 
-        # 2. Prepare data
-        data = prepare_training_data(
-            ohlcv_df,
-            sequence_length=config.SEQUENCE_LENGTH,
-            train_split=config.TRAIN_TEST_SPLIT,
-            use_path_deltas=False,
-            dual_stream=config.DUAL_STREAM,
-            volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
-        )
+        if not models:
+            models = [ACTIVE_MODELS["primary"]]
 
-        # 3. Load primary model and dynamically infer architecture
-        model_path = os.path.join(config.MODEL_SAVE_DIR, ACTIVE_MODELS["primary"])
-        if not os.path.exists(model_path):
-            return JSONResponse(status_code=404, content={
-                "error": f"Primary model not found: {ACTIVE_MODELS['primary']}. Train or upload a model first."
-            })
-            
         import tensorflow as tf
         from lstm_model import ContextDropout
-        temp_model = tf.keras.models.load_model(
-            model_path,
-            custom_objects={"ContextDropout": ContextDropout}
+        
+        loaded_models = []
+        min_seq_len = 9999
+        
+        # Phase 1: Load all models and determine sequence lengths
+        for model_filename in models:
+            model_path = os.path.join(config.MODEL_SAVE_DIR, model_filename)
+            if not os.path.exists(model_path):
+                logger.warning("Requested model not found: %s", model_filename)
+                continue
+                
+            temp_model = tf.keras.models.load_model(
+                model_path,
+                custom_objects={"ContextDropout": ContextDropout}
+            )
+            
+            # Safely infer expected sequence length from model inputs
+            seq_len = config.SEQUENCE_LENGTH
+            try:
+                # e.g., shape is (None, 60, 4)
+                input_shape = temp_model.inputs[0].shape
+                if len(input_shape) >= 2 and input_shape[1] is not None:
+                    seq_len = int(input_shape[1])
+            except Exception as e:
+                logger.warning("Could not infer sequence length for %s: %s", model_filename, e)
+                
+            min_seq_len = min(min_seq_len, seq_len)
+            
+            if temp_model.name == "MTLQuaternionPredictor":
+                mod_type = "mtl"
+            else:
+                mod_type = "lstm"
+                
+            predictor = build_primary_model(mod_type)
+            predictor.model = temp_model
+            
+            loaded_models.append({
+                "filename": model_filename,
+                "predictor": predictor,
+                "seq_len": seq_len
+            })
+            
+        if not loaded_models:
+            return JSONResponse(status_code=404, content={"error": "No valid models found to load."})
+
+        # Phase 2: Prepare global reference data (using the minimum sequence length to get the maximum number of test points)
+        reference_data = prepare_training_data(
+            ohlcv_df,
+            sequence_length=min_seq_len,
+            train_split=config.TRAIN_TEST_SPLIT,
+            use_path_deltas=False,
+            dual_stream=True,
+            volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
         )
         
-        if temp_model.name == "MTLQuaternionPredictor":
-            config.MODEL_TYPE = "mtl"
-        else:
-            config.MODEL_TYPE = "lstm"
+        global_scaler = reference_data["scaler"]
+        actual_prices = decode_quaternion_to_price(reference_data["y_test"], global_scaler)
+        max_test_points = len(actual_prices)
+        
+        model_predictions = []
+        
+        # Phase 3: Run inference individually with the correct sequence lengths
+        for m_info in loaded_models:
+            model_filename = m_info["filename"]
+            predictor = m_info["predictor"]
+            seq_len = m_info["seq_len"]
             
-        predictor = build_primary_model(config.MODEL_TYPE)
-        predictor.model = temp_model
+            m_data = prepare_training_data(
+                ohlcv_df,
+                sequence_length=seq_len,
+                train_split=config.TRAIN_TEST_SPLIT,
+                use_path_deltas=False,
+                dual_stream=True,
+                volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
+            )
+            
+            X_test_m = m_data["X_test"]
+            ctx_X_test_m = m_data.get("ctx_X_test")
+            
+            # Predict
+            predicted_prices = simulate_teacher_forcing(
+                predictor, global_scaler, X_test_m, ctx_X_test=ctx_X_test_m,
+            )
+            
+            # Calculate alignment padding (how many points this model is missing compared to the max_test_points)
+            padding_needed = max_test_points - len(predicted_prices)
+            padded_predictions = ([None] * padding_needed) + [round(float(p), 4) for p in predicted_prices]
+            
+            # Error metrics (only calculate on the valid non-padded portion)
+            model_actual = actual_prices[padding_needed:]
+            metrics = analyze_errors(model_actual, predicted_prices)
+            
+            model_predictions.append({
+                "name": model_filename,
+                "predicted_prices": padded_predictions,
+                "metrics": {k: round(float(v), 4) for k, v in metrics.items()}
+            })
+            
+            if "primary_predictor" not in locals():
+                primary_predictor = predictor
+                data = reference_data  # Save for oscillator
 
-        scaler = data["scaler"]
-        X_test = data["X_test"]
-        y_test = data["y_test"]
-        ctx_X_test = data.get("ctx_X_test") if config.DUAL_STREAM else None
-
-        # 4. Get actual prices
-        actual_prices = decode_quaternion_to_price(y_test, scaler)
-
-        # 5. Teacher-forcing predictions
-        predicted_prices = simulate_teacher_forcing(
-            predictor, scaler, X_test, ctx_X_test=ctx_X_test,
-        )
-
-        # 6. Error metrics
-        metrics = analyze_errors(actual_prices, predicted_prices)
-
-        # 7. Oscillator signals
+        # 7. Oscillator signals (using the first loaded model's residuals)
         signals = []
         next_signal = 0.0
-        osc_path = os.path.join(config.MODEL_SAVE_DIR, ACTIVE_MODELS["oscillator"])
-        if os.path.exists(osc_path):
-            try:
-                X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
-                y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
-                ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0) if config.DUAL_STREAM else None
-
-                residuals, pred_q = compute_residuals(
-                    predictor, X_all, y_all, scaler, ctx_X_test=ctx_X_all
-                )
-
-                osc_data = prepare_oscillator_data(
-                    residuals, pred_q,
-                    sequence_length=config.OSCILLATOR_SEQ_LEN,
-                    train_split=config.TRAIN_TEST_SPLIT,
-                )
-
-                oscillator = ResidualOscillator(
-                    sequence_length=config.OSCILLATOR_SEQ_LEN,
-                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
-                    dense_units=config.OSCILLATOR_DENSE_UNITS,
-                    learning_rate=config.OSCILLATOR_LEARNING_RATE,
-                )
-                oscillator.build_model()
-                oscillator.model.load_weights(osc_path)
-
-                test_signals = oscillator.predict(
-                    osc_data["X_res_test"], osc_data["X_q_test"]
-                )
-                signals = test_signals.flatten().tolist()
-
-                # Next signal
-                last_x = data["X_test"][-1:]
-                last_ctx = data["ctx_X_test"][-1:] if config.DUAL_STREAM else None
-                model_input = [last_x, last_ctx] if last_ctx is not None else last_x
-                next_q = predictor.predict(model_input)
-
-                recent_residuals = residuals[-config.OSCILLATOR_SEQ_LEN:]
-                recent_residuals = recent_residuals.reshape(1, config.OSCILLATOR_SEQ_LEN, 1).astype(np.float32)
-                next_signal = float(oscillator.predict(recent_residuals, next_q)[0, 0])
-            except Exception as e:
-                logger.warning("Oscillator inference failed: %s", e)
-                signals = []
-                next_signal = 0.0
+        if "primary_predictor" in locals():
+            osc_path = os.path.join(config.MODEL_SAVE_DIR, ACTIVE_MODELS["oscillator"])
+            if os.path.exists(osc_path):
+                try:
+                    X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
+                    y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
+                    ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
+    
+                    residuals, pred_q = compute_residuals(
+                        primary_predictor, X_all, y_all, global_scaler, ctx_X_test=ctx_X_all
+                    )
+    
+                    osc_data = prepare_oscillator_data(
+                        residuals, pred_q,
+                        sequence_length=config.OSCILLATOR_SEQ_LEN,
+                        train_split=config.TRAIN_TEST_SPLIT,
+                    )
+    
+                    oscillator = ResidualOscillator(
+                        sequence_length=config.OSCILLATOR_SEQ_LEN,
+                        lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                        dense_units=config.OSCILLATOR_DENSE_UNITS,
+                        learning_rate=config.OSCILLATOR_LEARNING_RATE,
+                    )
+                    oscillator.build_model()
+                    oscillator.model.load_weights(osc_path)
+    
+                    test_signals = oscillator.predict(
+                        osc_data["X_res_test"], osc_data["X_q_test"]
+                    )
+                    signals = test_signals.flatten().tolist()
+    
+                    # Next signal
+                    last_x = data["X_test"][-1:]
+                    last_ctx = data["ctx_X_test"][-1:]
+                    model_input = [last_x, last_ctx]
+                    next_q = primary_predictor.predict(model_input)
+    
+                    recent_residuals = residuals[-config.OSCILLATOR_SEQ_LEN:]
+                    recent_residuals = recent_residuals.reshape(1, config.OSCILLATOR_SEQ_LEN, 1).astype(np.float32)
+                    next_signal = float(oscillator.predict(recent_residuals, next_q)[0, 0])
+                except Exception as e:
+                    logger.warning("Oscillator inference failed: %s", e)
+                    signals = []
+                    next_signal = 0.0
 
         # 8. Prepare dates
         test_dates = ohlcv_df.index[-len(actual_prices):]
@@ -467,10 +527,9 @@ async def get_prediction_data():
             "interval": config.DEFAULT_INTERVAL,
             "dates": dates,
             "actual_prices": [round(float(p), 4) for p in actual_prices],
-            "predicted_prices": [round(float(p), 4) for p in predicted_prices],
+            "model_predictions": model_predictions,
             "signals": [round(float(s), 4) for s in signals],
             "next_signal": round(float(next_signal), 4),
-            "metrics": {k: round(float(v), 4) for k, v in metrics.items()},
             "data_points": len(ohlcv_df),
             "test_points": len(actual_prices),
         }

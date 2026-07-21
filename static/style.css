@@ -1273,3 +1273,75 @@ label {
 .justify-between { justify-content: space-between; }
 .w-full     { width: 100%; }
 .hidden     { display: none; }
+
+/* Model Pills */
+.model-pills-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+.model-pill {
+    padding: 4px 12px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.model-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+}
+.model-pill.selected {
+    background: rgba(0, 240, 255, 0.15);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+}
+.model-pill-color-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+.model-pill.selected .model-pill-color-indicator {
+    background: var(--primary-color); /* Overridden inline by JS */
+}
+
+/* Comparative Table */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+}
+.metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 0.9rem;
+}
+.metrics-table th {
+    text-align: left;
+    padding: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.metrics-table td {
+    padding: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.metrics-table tr:last-child td {
+    border-bottom: none;
+}
+.metric-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
