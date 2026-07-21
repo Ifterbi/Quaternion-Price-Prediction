@@ -371,16 +371,23 @@ async def get_prediction_data():
             volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
         )
 
-        # 3. Build and load primary model
-        predictor = build_primary_model(config.MODEL_TYPE)
-
+        # 3. Load primary model and dynamically infer architecture
         model_path = os.path.join(config.MODEL_SAVE_DIR, ACTIVE_MODELS["primary"])
-        if os.path.exists(model_path):
-            predictor.load_model(model_path)
-        else:
+        if not os.path.exists(model_path):
             return JSONResponse(status_code=404, content={
                 "error": f"Primary model not found: {ACTIVE_MODELS['primary']}. Train or upload a model first."
             })
+            
+        import tensorflow as tf
+        temp_model = tf.keras.models.load_model(model_path)
+        
+        if temp_model.name == "MTLQuaternionPredictor":
+            config.MODEL_TYPE = "mtl"
+        else:
+            config.MODEL_TYPE = "lstm"
+            
+        predictor = build_primary_model(config.MODEL_TYPE)
+        predictor.model = temp_model
 
         scaler = data["scaler"]
         X_test = data["X_test"]

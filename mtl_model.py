@@ -246,6 +246,17 @@ class MultiTaskQuaternionPredictor:
 
         return history
 
+    def load_model(self, filepath: str) -> None:
+        """Load model weights or entire model from disk.
+        
+        Args:
+            filepath: Path to the .keras file.
+        """
+        # If loading full architecture (keras file):
+        import tensorflow as tf
+        self.model = tf.keras.models.load_model(filepath)
+        logger.info("Loaded MTL model from %s", filepath)
+
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generate predictions for the given input sequences.
 
