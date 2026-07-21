@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import json
 import logging
 from typing import Tuple, Dict, Optional
 
@@ -214,6 +215,20 @@ def plot_results(
     plt.savefig(residuals_path, bbox_inches='tight')
     plt.close()
     logger.info("Saved residuals plot to %s", residuals_path)
+    
+    # Export data to JSON for interactive UI
+    json_path = os.path.join(config.VISUALIZATION_DIR, "chart_data.json")
+    chart_data = {
+        "dates_results": [str(d) for d in dates],
+        "actual": actual.tolist(),
+        "predicted_tf": predicted_tf.tolist(),
+        "predicted_ar": predicted_ar.tolist(),
+        "errors_tf": errors_tf.tolist(),
+        "errors_ar": errors_ar.tolist()
+    }
+    with open(json_path, 'w') as f:
+        json.dump(chart_data, f)
+    logger.info("Saved JSON chart data to %s", json_path)
 
 
 def plot_oscillator_signals(
@@ -244,30 +259,30 @@ def plot_oscillator_signals(
 
     ax2 = ax1.twinx()
     color2 = 'purple'
-    ax2.set_ylabel('Oscillator Signal [-1, 1]', color=color2, fontsize=12)
-    ax2.plot(dates, signals, color=color2, label='Valuation Signal', alpha=0.7, linestyle='-')
+    ax2.set_ylabel('Divergence Momentum [-1, 1]', color=color2, fontsize=12)
+    ax2.plot(dates, signals, color=color2, label='Momentum Signal', alpha=0.7, linestyle='-')
     ax2.axhline(y=0, color='gray', linestyle=':', alpha=0.8)
     
-    # Highlight over/undervalued zones based on the signal across the entire vertical axis
+    # Highlight momentum zones based on the signal across the entire vertical axis
     ax1.fill_between(
         dates, 0, 1, 
         where=(signals.flatten() > 0), 
         color='red', alpha=0.1, 
-        label='Overvalued (Sell Zone)', 
+        label='Upward Divergence', 
         transform=ax1.get_xaxis_transform()
     )
     ax1.fill_between(
         dates, 0, 1, 
         where=(signals.flatten() < 0), 
         color='green', alpha=0.1, 
-        label='Undervalued (Buy Zone)', 
+        label='Downward Divergence', 
         transform=ax1.get_xaxis_transform()
     )
     
     ax2.set_ylim(-1.1, 1.1)
     ax2.tick_params(axis='y', labelcolor=color2)
 
-    plt.title(f"Price vs Valuation Oscillator {title_suffix}", fontsize=16)
+    plt.title(f"Price vs Divergence Momentum Oscillator {title_suffix}", fontsize=16)
     
     # Combine legends
     lines_1, labels_1 = ax1.get_legend_handles_labels()
@@ -278,3 +293,21 @@ def plot_oscillator_signals(
     plt.savefig(plot_path, bbox_inches='tight')
     plt.close()
     logger.info("Saved oscillator signals plot to %s", plot_path)
+
+    # Export data to JSON for interactive UI
+    json_path = os.path.join(config.VISUALIZATION_DIR, "chart_data.json")
+    chart_data = {}
+    if os.path.exists(json_path):
+        with open(json_path, 'r') as f:
+            chart_data = json.load(f)
+            
+    chart_data.update({
+        "dates_oscillator": [str(d) for d in dates],
+        "osc_actual": actual_prices.tolist(),
+        "osc_predicted": predicted_prices.tolist(),
+        "osc_signals": signals.flatten().tolist()
+    })
+    
+    with open(json_path, 'w') as f:
+        json.dump(chart_data, f)
+    logger.info("Updated JSON chart data at %s", json_path)

@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Quaternion AI Predictor — Advanced LSTM price prediction dashboard with dual-stream architecture and residual oscillator signals.">
+    <title>Quaternion AI Predictor</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='4' y='26' font-size='28'>◆</text></svg>">
+</head>
+<body>
+
+    <!-- Animated background orbs -->
+    <div class="orb orb-1" aria-hidden="true"></div>
+    <div class="orb orb-2" aria-hidden="true"></div>
+    <div class="orb orb-3" aria-hidden="true"></div>
+
+    <div class="app-layout">
+
+        <!-- ─── Sidebar ─── -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon">Q</div>
+                <div class="brand-text">
+                    <h1>Quaternion AI</h1>
+                    <p>Price Predictor</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-section="dashboard" id="nav-dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </button>
+                <button class="nav-item" data-section="models" id="nav-models">
+                    <span class="nav-icon">🧠</span>
+                    <span>Models</span>
+                </button>
+                <button class="nav-item" data-section="training" id="nav-training">
+                    <span class="nav-icon">⚡</span>
+                    <span>Training</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-row">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Ready</span>
+                </div>
+                <div class="version-text">Dual-Stream LSTM · FiLM Fusion</div>
+            </div>
+        </aside>
+
+        <!-- ─── Main Content ─── -->
+        <main class="main-content">
+
+            <!-- ════════════════════════════════════════════ -->
+            <!-- DASHBOARD SECTION                          -->
+            <!-- ════════════════════════════════════════════ -->
+            <section class="section active" id="section-dashboard">
+                <div class="page-header">
+                    <h2>Prediction Dashboard</h2>
+                    <p class="header-subtitle">Real-time price predictions and oscillator signals</p>
+                </div>
+
+                <!-- Metrics Row -->
+                <div class="grid-4 metrics-row" id="metrics-row">
+                    <div class="card metric-card">
+                        <div class="metric-label">Ticker</div>
+                        <div class="metric-value" id="metric-ticker">—</div>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="metric-label">Data Points</div>
+                        <div class="metric-value" id="metric-datapoints">—</div>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="metric-label">MAE</div>
+                        <div class="metric-value" id="metric-mae">—</div>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="metric-label">Future Signal</div>
+                        <div class="metric-value" id="metric-signal">—</div>
+                        <div id="signal-badge-container"></div>
+                    </div>
+                </div>
+
+                <!-- Price Chart -->
+                <div class="card" id="chart-card">
+                    <div class="card-header">
+                        <h3>Price Prediction Overlay</h3>
+                        <div class="chart-controls">
+                            <button class="btn btn-sm btn-secondary" id="btn-reset-zoom" title="Reset zoom">⟲ Reset Zoom</button>
+                            <button class="btn btn-sm btn-secondary" id="btn-toggle-actual" title="Toggle actual prices">Actual</button>
+                            <button class="btn btn-sm btn-secondary" id="btn-toggle-predicted" title="Toggle predicted prices">Predicted</button>
+                            <button class="btn btn-sm btn-secondary" id="btn-toggle-signal" title="Toggle oscillator signal">Signal</button>
+                            <span style="color: rgba(255,255,255,0.2);">|</span>
+                            <button class="btn btn-sm btn-secondary" id="btn-toggle-draw" title="Draw Trendline">✏️ Draw</button>
+                            <button class="btn btn-sm btn-secondary" id="btn-clear-draw" title="Clear all lines" style="display: none;">🗑️ Clear</button>
+                        </div>
+                    </div>
+                    <div class="chart-container" id="price-chart-container">
+                        <canvas id="price-chart"></canvas>
+                    </div>
+                    <div class="chart-hint">Scroll to zoom · Click + drag to pan · Double-click to reset</div>
+                </div>
+
+                <!-- Error Metrics -->
+                <div class="grid-3" id="error-metrics-row" style="margin-top: 20px;">
+                    <div class="card metric-card">
+                        <div class="metric-label">MAE</div>
+                        <div class="metric-value metric-small" id="metric-mae-detail">—</div>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="metric-label">RMSE</div>
+                        <div class="metric-value metric-small" id="metric-rmse">—</div>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="metric-label">MAPE</div>
+                        <div class="metric-value metric-small" id="metric-mape">—</div>
+                    </div>
+                </div>
+
+                <!-- Data Source Form -->
+                <div class="card" id="card-data-source" style="margin-top: 20px;">
+                    <form id="form-data-source">
+                        <div class="card-header">
+                            <h3>📡 Data Source Settings</h3>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="cfg-ticker-primary">Primary Ticker</label>
+                                <div class="autocomplete-wrapper">
+                                    <input type="text" id="cfg-ticker-primary" name="ticker_primary" placeholder="e.g. AAPL, TSLA, BTC-USD" autocomplete="off">
+                                    <div class="autocomplete-dropdown" id="ticker-dropdown" style="display: none;"></div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-ticker-fallback">Fallback Ticker</label>
+                                <input type="text" id="cfg-ticker-fallback" name="ticker_fallback">
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-start-date">Start Date</label>
+                                <input type="text" id="cfg-start-date" name="default_start_date" placeholder="YYYY-MM-DD">
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-interval">Interval</label>
+                                <select id="cfg-interval" name="default_interval">
+                                    <option value="1m">1 Minute</option>
+                                    <option value="5m">5 Minutes</option>
+                                    <option value="15m">15 Minutes</option>
+                                    <option value="30m">30 Minutes</option>
+                                    <option value="1h">1 Hour</option>
+                                    <option value="1d">1 Day</option>
+                                    <option value="1wk">1 Week</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="config-actions" style="margin-top: 16px; justify-content: flex-end;">
+                            <button type="submit" class="btn btn-primary" id="btn-save-data-source">
+                                💾 Save Data Source
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Load Data Button -->
+                <div style="margin-top: 20px; text-align: center;">
+                    <button class="btn btn-primary" id="btn-load-data">
+                        <span>◆</span> Load Prediction Data
+                    </button>
+                </div>
+            </section>
+
+            <!-- ════════════════════════════════════════════ -->
+            <!-- MODELS SECTION                             -->
+            <!-- ════════════════════════════════════════════ -->
+            <section class="section" id="section-models">
+                <div class="page-header">
+                    <h2>Model Management</h2>
+                    <p class="header-subtitle">Upload, activate, and manage saved model weights</p>
+                </div>
+
+                <!-- Upload Zones -->
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Upload Primary Model</h3>
+                            <span class="card-badge badge-cyan">Quaternion LSTM</span>
+                        </div>
+                        <div class="upload-zone" id="upload-zone-primary" data-model-type="primary">
+                            <div class="upload-icon">🧠</div>
+                            <div class="upload-text">Drop .keras file here or click to browse</div>
+                            <div class="upload-hint">Dual-stream LSTM quaternion predictor weights</div>
+                            <input type="file" class="upload-input" id="upload-input-primary" accept=".keras" hidden>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Upload Oscillator Model</h3>
+                            <span class="card-badge badge-purple">Signal Model</span>
+                        </div>
+                        <div class="upload-zone" id="upload-zone-oscillator" data-model-type="oscillator">
+                            <div class="upload-icon">📡</div>
+                            <div class="upload-text">Drop .keras file here or click to browse</div>
+                            <div class="upload-hint">Residual oscillator signal model weights</div>
+                            <input type="file" class="upload-input" id="upload-input-oscillator" accept=".keras" hidden>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Model List -->
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h3>Saved Models</h3>
+                        <button class="btn btn-sm btn-secondary" id="btn-refresh-models">⟲ Refresh</button>
+                    </div>
+                    <div id="models-list">
+                        <p class="text-muted">Loading models...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ════════════════════════════════════════════ -->
+            <!-- TRAINING SECTION                           -->
+            <!-- ════════════════════════════════════════════ -->
+            <section class="section" id="section-training">
+                <div class="page-header">
+                    <h2>Training Center</h2>
+                    <p class="header-subtitle">Train new models with real-time progress monitoring</p>
+                </div>
+
+                <!-- Training Controls -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Training Configuration</h3>
+                        <div id="training-phase-badge"></div>
+                    </div>
+                    <div class="grid-4">
+                        <div class="form-group">
+                            <label for="train-model-name">Save Model As</label>
+                            <input type="text" id="train-model-name" value="best_model" placeholder="e.g. custom_btc">
+                        </div>
+                        <div class="form-group">
+                            <label for="train-epochs">Primary Epochs</label>
+                            <input type="number" id="train-epochs" value="20" min="1" max="500">
+                        </div>
+                        <div class="form-group">
+                            <label for="train-osc-epochs">Oscillator Epochs</label>
+                            <input type="number" id="train-osc-epochs" value="20" min="1" max="500">
+                        </div>
+                        <div class="form-group" style="display: flex; align-items: flex-end;">
+                            <button class="btn btn-primary" id="btn-start-training" style="width: 100%;">
+                                ⚡ Start Training
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div id="training-progress-container" style="margin-top: 16px; display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="training-progress-fill" style="width: 0%;"></div>
+                        </div>
+                        <div class="progress-label" id="training-progress-label">0%</div>
+                    </div>
+                </div>
+
+                <!-- Training Charts -->
+                <div class="grid-2" style="margin-top: 20px;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Loss</h3>
+                        </div>
+                        <div class="chart-container chart-container-sm">
+                            <canvas id="loss-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>MAE</h3>
+                        </div>
+                        <div class="chart-container chart-container-sm">
+                            <canvas id="mae-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Terminal Log -->
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h3>Training Log</h3>
+                        <button class="btn btn-sm btn-secondary" id="btn-clear-log">Clear</button>
+                    </div>
+                    <div class="terminal" id="training-terminal">
+                        <div class="terminal-header">
+                            <span class="terminal-dot dot-red"></span>
+                            <span class="terminal-dot dot-yellow"></span>
+                            <span class="terminal-dot dot-green"></span>
+                        </div>
+                        <div class="terminal-body" id="terminal-body">
+                            <div class="terminal-line">[SYSTEM] Ready. Press "Start Training" to begin.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hyperparameters Config -->
+                <div class="card" id="card-hyperparameters" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h3>Advanced Model Hyperparameters</h3>
+                    </div>
+                    <form id="form-hyperparameters">
+                        
+                        <!-- Sequence / Features -->
+                        <div class="config-section" id="config-sequence">
+                            <div class="config-section-header" data-section="config-sequence">
+                                <span class="section-title">📐 Sequence & Features</span>
+                                <span class="section-toggle">▼</span>
+                            </div>
+                            <div class="config-section-body">
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="cfg-seq-length">Sequence Length</label>
+                                        <input type="number" id="cfg-seq-length" name="sequence_length" min="5" max="500">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Quaternion Components</label>
+                                        <input type="text" value="4 (w, x, y, z)" disabled class="text-muted">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dual-Stream -->
+                        <div class="config-section" id="config-dual-stream">
+                            <div class="config-section-header" data-section="config-dual-stream">
+                                <span class="section-title">🔀 Dual-Stream Architecture</span>
+                                <span class="section-toggle">▼</span>
+                            </div>
+                            <div class="config-section-body">
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <span>Enable Dual-Stream</span>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="cfg-dual-stream" name="dual_stream">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </label>
+                                </div>
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="cfg-ctx-lstm-units">Context LSTM Units</label>
+                                        <input type="number" id="cfg-ctx-lstm-units" name="context_lstm_units" min="4" max="512">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-volume-ma">Volume MA Window</label>
+                                        <input type="number" id="cfg-volume-ma" name="volume_ma_window" min="2" max="200">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-fusion">Fusion Strategy</label>
+                                        <select id="cfg-fusion" name="fusion_strategy">
+                                            <option value="film">FiLM (Feature-wise Linear Modulation)</option>
+                                            <option value="gate">Gated Fusion</option>
+                                            <option value="concat">Concatenation</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-fusion-dense">Fusion Dense Units</label>
+                                        <input type="number" id="cfg-fusion-dense" name="fusion_dense_units" min="4" max="512">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-ctx-dropout">Context Dropout Rate</label>
+                                        <input type="number" id="cfg-ctx-dropout" name="context_dropout_rate" min="0" max="1" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Model Architecture -->
+                        <div class="config-section" id="config-model-arch">
+                            <div class="config-section-header" data-section="config-model-arch">
+                                <span class="section-title">🏗️ Model Architecture</span>
+                                <span class="section-toggle">▼</span>
+                            </div>
+                            <div class="config-section-body">
+                                <div class="grid-3">
+                                    <div class="form-group">
+                                        <label for="cfg-lstm-units">LSTM Units</label>
+                                        <input type="number" id="cfg-lstm-units" name="lstm_units" min="4" max="1024">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-dense-units">Dense Units</label>
+                                        <input type="number" id="cfg-dense-units" name="dense_units" min="4" max="1024">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-dropout">Dropout Rate</label>
+                                        <input type="number" id="cfg-dropout" name="dropout_rate" min="0" max="0.9" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Training Hyperparameters -->
+                        <div class="config-section" id="config-training">
+                            <div class="config-section-header" data-section="config-training">
+                                <span class="section-title">🎯 Training Hyperparameters</span>
+                                <span class="section-toggle">▼</span>
+                            </div>
+                            <div class="config-section-body">
+                                <div class="grid-3">
+                                    <div class="form-group">
+                                        <label for="cfg-lr">Learning Rate</label>
+                                        <input type="number" id="cfg-lr" name="learning_rate" min="0.00001" max="1" step="0.0001">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-batch">Batch Size</label>
+                                        <input type="number" id="cfg-batch" name="batch_size" min="1" max="1024">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-epochs-config">Epochs</label>
+                                        <input type="number" id="cfg-epochs-config" name="epochs" min="1" max="1000">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-val-split">Validation Split</label>
+                                        <input type="number" id="cfg-val-split" name="validation_split" min="0.01" max="0.5" step="0.01">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-train-split">Train/Test Split</label>
+                                        <input type="number" id="cfg-train-split" name="train_test_split" min="0.1" max="0.99" step="0.01">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-seed">Random Seed</label>
+                                        <input type="number" id="cfg-seed" name="random_seed" min="0" max="999999">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Oscillator -->
+                        <div class="config-section" id="config-oscillator">
+                            <div class="config-section-header" data-section="config-oscillator">
+                                <span class="section-title">📡 Oscillator Model</span>
+                                <span class="section-toggle">▼</span>
+                            </div>
+                            <div class="config-section-body">
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <span>Mean-Center Residuals</span>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="cfg-mean-center" name="mean_center_oscillator">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </label>
+                                </div>
+                                <div class="grid-3">
+                                    <div class="form-group">
+                                        <label for="cfg-osc-seq">Sequence Length</label>
+                                        <input type="number" id="cfg-osc-seq" name="oscillator_seq_len" min="2" max="200">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-osc-lstm">LSTM Units</label>
+                                        <input type="number" id="cfg-osc-lstm" name="oscillator_lstm_units" min="2" max="256">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-osc-dense">Dense Units</label>
+                                        <input type="number" id="cfg-osc-dense" name="oscillator_dense_units" min="2" max="256">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-osc-epochs-config">Epochs</label>
+                                        <input type="number" id="cfg-osc-epochs-config" name="oscillator_epochs" min="1" max="500">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-osc-lr">Learning Rate</label>
+                                        <input type="number" id="cfg-osc-lr" name="oscillator_learning_rate" min="0.00001" max="1" step="0.0001">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="config-actions" style="margin-top: 16px; justify-content: flex-end;">
+                            <button type="button" class="btn btn-secondary" id="btn-reset-hyperparameters">
+                                ⟲ Reset
+                            </button>
+                            <button type="submit" class="btn btn-primary" id="btn-save-hyperparameters">
+                                💾 Save Hyperparameters
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+
+
+        </main>
+    </div>
+
+    <!-- Vendor scripts (bundled locally) -->
+    <script src="/static/vendor/chart.min.js"></script>
+    <script src="/static/vendor/hammer.min.js"></script>
+    <script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
+
+    <!-- Application script -->
+    <script src="/static/app.js"></script>
+
+</body>
+</html>

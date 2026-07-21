@@ -517,16 +517,21 @@ def prepare_oscillator_data(
     if n <= sequence_length:
         raise ValueError(f"Not enough data ({n}) for sequence length {sequence_length}.")
         
-    # Compute implicit target: tanh(residual / std)
-    std_res = np.std(residuals)
-    mean_res = np.mean(residuals) if config.MEAN_CENTER_OSCILLATOR else 0.0
+    # Compute implicit target: divergence momentum (derivative of residual)
+    delta_residuals = np.zeros_like(residuals)
+    delta_residuals[1:] = residuals[1:] - residuals[:-1]
+    
+    std_delta = np.std(delta_residuals)
+    mean_delta = np.mean(delta_residuals) if config.MEAN_CENTER_OSCILLATOR else 0.0
     
     # Avoid division by zero
-    std_res = std_res if std_res > 1e-12 else 1.0
-    targets = np.tanh((residuals - mean_res) / std_res)
+    std_delta = std_delta if std_delta > 1e-12 else 1.0
+    
+    # Target is the momentum of the divergence
+    targets = np.tanh((delta_residuals - mean_delta) / std_delta)
     
     if config.MEAN_CENTER_OSCILLATOR:
-        logger.info("Mean-centering oscillator residuals (subtracted %.4f)", mean_res)
+        logger.info("Mean-centering divergence momentum (subtracted %.4f)", mean_delta)
     
     X_res, X_q, y = [], [], []
     
@@ -563,7 +568,7 @@ def prepare_oscillator_data(
         "X_res_test": X_res[split_idx:],
         "X_q_test": X_q[split_idx:],
         "y_test": y[split_idx:],
-        "residual_std": std_res,
+        "residual_std": std_delta,
     }
 
 

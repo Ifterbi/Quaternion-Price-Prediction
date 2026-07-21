@@ -14,10 +14,24 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCh
 import numpy as np
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from io import StringIO
 
 logger = logging.getLogger(__name__)
+
+def directional_momentum_loss(y_true, y_pred):
+    """
+    Custom loss combining MSE with a Soft-Sign Momentum matching penalty.
+    Loss = MSE(y_true, y_pred) - 0.5 * (y_true * y_pred)
+    """
+    mse_loss = tf.reduce_mean(tf.square(y_true - y_pred), axis=-1)
+    
+    # Matching signs yield positive product (subtracts from loss).
+    # Opposing signs yield negative product (adds to loss).
+    lambda_weight = 0.5
+    directional_reward = tf.reduce_mean(lambda_weight * (y_true * y_pred), axis=-1)
+    
+    return mse_loss - directional_reward
 
 class ResidualOscillator:
     """Predicts a valuation signal in [-1, 1].
@@ -82,8 +96,8 @@ class ResidualOscillator:
         model = Model(inputs=[res_input, q_input], outputs=output, name="ResidualOscillator")
         
         optimizer = Adam(learning_rate=self.learning_rate)
-        # We use MSE since the target is a continuous float from np.tanh
-        model.compile(optimizer=optimizer, loss="mse", metrics=["mae"])
+        # We use the custom directional momentum loss
+        model.compile(optimizer=optimizer, loss=directional_momentum_loss, metrics=["mae"])
         
         self.model = model
         logger.info("ResidualOscillator built and compiled.")
@@ -97,21 +111,25 @@ class ResidualOscillator:
         validation_split: float = 0.1,
         save_best: bool = True,
         model_path: str = "saved_models/oscillator_model.keras",
+        callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
     ) -> tf.keras.callbacks.History:
         """Train the oscillator model."""
         if self.model is None:
             raise RuntimeError("Model not built.")
 
-        callbacks = [
+        internal_callbacks = [
             EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True, verbose=1),
             ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, min_lr=1e-5, verbose=1),
         ]
 
         if save_best:
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            callbacks.append(
+            internal_callbacks.append(
                 ModelCheckpoint(filepath=model_path, monitor="val_loss", save_best_only=True, verbose=1)
             )
+
+        if callbacks:
+            internal_callbacks.extend(callbacks)
 
         X_train = [data_dict["X_res_train"], data_dict["X_q_train"]]
         y_train = data_dict["y_train"]
@@ -123,7 +141,7 @@ class ResidualOscillator:
             epochs=epochs,
             batch_size=batch_size,
             validation_split=validation_split,
-            callbacks=callbacks,
+            callbacks=internal_callbacks,
             verbose=1,
         )
         return history

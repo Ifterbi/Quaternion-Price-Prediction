@@ -376,13 +376,15 @@ def train_oscillator_model(primary_predictor, data, ohlcv_df):
     
     # 6. Predict the next unknown signal
     next_signal = get_next_oscillator_signal(primary_predictor, oscillator, data, ohlcv_df)
-    print(f"\n[!] FUTURE VALUATION SIGNAL for {ohlcv_df.index[-1] + pd.Timedelta(days=1)}: {next_signal:.4f}")
+    print(f"\n[!] FUTURE DIVERGENCE MOMENTUM SIGNAL for {ohlcv_df.index[-1] + pd.Timedelta(days=1)}: {next_signal:.4f}")
     if next_signal > 0.5:
-        print("    -> Indicates OVERVALUED (Sell Signal)")
+        print("    -> Indicates STRONG UPWARD DIVERGENCE (Price breaking away up)")
     elif next_signal < -0.5:
-        print("    -> Indicates UNDERVALUED (Buy Signal)")
+        print("    -> Indicates STRONG DOWNWARD DIVERGENCE (Price breaking away down)")
+    elif abs(next_signal) < 0.1:
+        print("    -> Indicates POTENTIAL INFLECTION POINT (Momentum flipping - Reversal Imminent)")
     else:
-        print("    -> Indicates FAIR VALUATION")
+        print("    -> Indicates WEAK/NEUTRAL MOMENTUM")
 
     return oscillator
 

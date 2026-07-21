@@ -351,6 +351,7 @@ class QuaternionLSTMPredictor:
         validation_split: float = 0.1,
         save_best: bool = True,
         model_path: str = "saved_models/best_model.keras",
+        callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
     ) -> tf.keras.callbacks.History:
         """Train the LSTM model.
 
@@ -386,7 +387,7 @@ class QuaternionLSTMPredictor:
         )
 
         # --- Callbacks ---
-        callbacks = [
+        internal_callbacks = [
             EarlyStopping(
                 monitor="val_loss",
                 patience=10,
@@ -406,7 +407,7 @@ class QuaternionLSTMPredictor:
             model_dir = os.path.dirname(model_path)
             if model_dir:
                 os.makedirs(model_dir, exist_ok=True)
-            callbacks.append(
+            internal_callbacks.append(
                 ModelCheckpoint(
                     filepath=model_path,
                     monitor="val_loss",
@@ -414,6 +415,9 @@ class QuaternionLSTMPredictor:
                     verbose=1,
                 )
             )
+
+        if callbacks:
+            internal_callbacks.extend(callbacks)
 
         # --- Fit ---
         # Keras model.fit() natively accepts a list of arrays for
@@ -425,7 +429,7 @@ class QuaternionLSTMPredictor:
             epochs=epochs,
             batch_size=batch_size,
             validation_split=validation_split,
-            callbacks=callbacks,
+            callbacks=internal_callbacks,
             verbose=1,
         )
 

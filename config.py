@@ -29,8 +29,8 @@ DEFAULT_INTERVAL: str = "1d"
 # ──────────────────────────────────────────────
 # Sequence / feature dimensions
 # ──────────────────────────────────────────────
-SEQUENCE_LENGTH: int = 60
-"""Number of time-steps in each input sequence. (60 is roughly 3 months of daily candles)"""
+SEQUENCE_LENGTH: int = 30
+"""Number of time-steps in each input sequence. (30 is roughly 1.5 months of daily candles)"""
 
 N_FEATURES: int = 4
 """Number of quaternion components per time-step (w, x, y, z)."""
