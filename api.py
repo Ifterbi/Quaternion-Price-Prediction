@@ -379,7 +379,11 @@ async def get_prediction_data():
             })
             
         import tensorflow as tf
-        temp_model = tf.keras.models.load_model(model_path)
+        from lstm_model import ContextDropout
+        temp_model = tf.keras.models.load_model(
+            model_path,
+            custom_objects={"ContextDropout": ContextDropout}
+        )
         
         if temp_model.name == "MTLQuaternionPredictor":
             config.MODEL_TYPE = "mtl"

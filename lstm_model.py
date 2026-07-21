@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Custom layer: Context Dropout
 # ---------------------------------------------------------------------------
+@tf.keras.saving.register_keras_serializable(package="lstm_model")
 class ContextDropout(Layer):
     """Replace random context timesteps with stale (repeated) values.
 
