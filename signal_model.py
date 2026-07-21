@@ -19,6 +19,9 @@ from io import StringIO
 
 logger = logging.getLogger(__name__)
 
+import keras
+
+@keras.saving.register_keras_serializable()
 def directional_momentum_loss(y_true, y_pred):
     """
     Custom loss combining MSE with a Soft-Sign Momentum matching penalty.

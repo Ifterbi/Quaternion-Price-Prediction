@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Custom layer: Context Dropout
 # ---------------------------------------------------------------------------
+import keras
+
+@keras.saving.register_keras_serializable()
 class ContextDropout(Layer):
     """Replace random context timesteps with stale (repeated) values.
 
