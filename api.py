@@ -154,7 +154,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def serve_dashboard():
     """Serve the main dashboard HTML."""
     index_path = os.path.join(STATIC_DIR, "index.html")
-    with open(index_path, "r") as f:
+    with open(index_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 
@@ -283,7 +283,7 @@ async def update_config(update: ConfigUpdate):
     """Update config values in-memory and persist to config.py on disk."""
     config_path = os.path.join(os.path.dirname(__file__), "config.py")
 
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     updates = update.model_dump(exclude_none=True)
@@ -316,7 +316,7 @@ async def update_config(update: ConfigUpdate):
 
         content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
 
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         f.write(content)
 
     return {"status": "ok", "updated": list(updates.keys())}
