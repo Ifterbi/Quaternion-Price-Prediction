@@ -41,6 +41,7 @@ from quaternion_encoder import (
     prepare_oscillator_data,
 )
 from lstm_model import QuaternionLSTMPredictor
+from mtl_model import MultiTaskQuaternionPredictor
 from signal_model import ResidualOscillator
 from model_analysis import (
     simulate_autoregressive,
@@ -177,6 +178,7 @@ class ConfigUpdate(BaseModel):
     fusion_dense_units: Optional[int] = None
     context_dropout_rate: Optional[float] = None
     # Model architecture
+    model_type: Optional[str] = None
     lstm_units: Optional[int] = None
     dense_units: Optional[int] = None
     dropout_rate: Optional[float] = None
@@ -210,6 +212,7 @@ _CONFIG_FIELD_MAP = {
     "fusion_strategy": "FUSION_STRATEGY",
     "fusion_dense_units": "FUSION_DENSE_UNITS",
     "context_dropout_rate": "CONTEXT_DROPOUT_RATE",
+    "model_type": "MODEL_TYPE",
     "lstm_units": "LSTM_UNITS",
     "dense_units": "DENSE_UNITS",
     "dropout_rate": "DROPOUT_RATE",
@@ -252,6 +255,7 @@ async def get_config():
             "context_dropout_rate": config.CONTEXT_DROPOUT_RATE,
         },
         "model_architecture": {
+            "model_type": config.MODEL_TYPE,
             "lstm_units": config.LSTM_UNITS,
             "dense_units": config.DENSE_UNITS,
             "dropout_rate": config.DROPOUT_RATE,
@@ -369,21 +373,31 @@ async def get_prediction_data():
         )
 
         # 3. Build and load primary model
-        predictor = QuaternionLSTMPredictor(
-            sequence_length=config.SEQUENCE_LENGTH,
-            n_features=config.N_FEATURES,
-            lstm_units=config.LSTM_UNITS,
-            dense_units=config.DENSE_UNITS,
-            dropout_rate=config.DROPOUT_RATE,
-            learning_rate=config.LEARNING_RATE,
-            output_size=config.N_FEATURES,
-            dual_stream=config.DUAL_STREAM,
-            n_context_features=config.N_CONTEXT_FEATURES if config.DUAL_STREAM else 5,
-            context_lstm_units=config.CONTEXT_LSTM_UNITS if config.DUAL_STREAM else 32,
-            fusion_strategy=config.FUSION_STRATEGY if config.DUAL_STREAM else "film",
-            fusion_dense_units=config.FUSION_DENSE_UNITS if config.DUAL_STREAM else 48,
-            context_dropout_rate=config.CONTEXT_DROPOUT_RATE if config.DUAL_STREAM else 0.15,
-        )
+        if config.MODEL_TYPE == "mtl":
+            predictor = MultiTaskQuaternionPredictor(
+                sequence_length=config.SEQUENCE_LENGTH,
+                n_features=config.N_FEATURES,
+                lstm_units=config.LSTM_UNITS,
+                aux_dense_units=16,
+                dropout_rate=config.DROPOUT_RATE,
+                learning_rate=config.LEARNING_RATE,
+            )
+        else:
+            predictor = QuaternionLSTMPredictor(
+                sequence_length=config.SEQUENCE_LENGTH,
+                n_features=config.N_FEATURES,
+                lstm_units=config.LSTM_UNITS,
+                dense_units=config.DENSE_UNITS,
+                dropout_rate=config.DROPOUT_RATE,
+                learning_rate=config.LEARNING_RATE,
+                output_size=config.N_FEATURES,
+                dual_stream=config.DUAL_STREAM,
+                n_context_features=config.N_CONTEXT_FEATURES if config.DUAL_STREAM else 5,
+                context_lstm_units=config.CONTEXT_LSTM_UNITS if config.DUAL_STREAM else 32,
+                fusion_strategy=config.FUSION_STRATEGY if config.DUAL_STREAM else "film",
+                fusion_dense_units=config.FUSION_DENSE_UNITS if config.DUAL_STREAM else 48,
+                context_dropout_rate=config.CONTEXT_DROPOUT_RATE if config.DUAL_STREAM else 0.15,
+            )
         predictor.build_model()
 
         model_path = os.path.join(config.MODEL_SAVE_DIR, ACTIVE_MODELS["primary"])
@@ -534,21 +548,31 @@ async def start_training(
 
             # 3. Build primary model
             TRAINING_STATE["logs"].append("[SYSTEM] Building primary model...")
-            predictor = QuaternionLSTMPredictor(
-                sequence_length=config.SEQUENCE_LENGTH,
-                n_features=config.N_FEATURES,
-                lstm_units=config.LSTM_UNITS,
-                dense_units=config.DENSE_UNITS,
-                dropout_rate=config.DROPOUT_RATE,
-                learning_rate=config.LEARNING_RATE,
-                output_size=config.N_FEATURES,
-                dual_stream=config.DUAL_STREAM,
-                n_context_features=config.N_CONTEXT_FEATURES if config.DUAL_STREAM else 5,
-                context_lstm_units=config.CONTEXT_LSTM_UNITS if config.DUAL_STREAM else 32,
-                fusion_strategy=config.FUSION_STRATEGY if config.DUAL_STREAM else "film",
-                fusion_dense_units=config.FUSION_DENSE_UNITS if config.DUAL_STREAM else 48,
-                context_dropout_rate=config.CONTEXT_DROPOUT_RATE if config.DUAL_STREAM else 0.15,
-            )
+            if config.MODEL_TYPE == "mtl":
+                predictor = MultiTaskQuaternionPredictor(
+                    sequence_length=config.SEQUENCE_LENGTH,
+                    n_features=config.N_FEATURES,
+                    lstm_units=config.LSTM_UNITS,
+                    aux_dense_units=16,
+                    dropout_rate=config.DROPOUT_RATE,
+                    learning_rate=config.LEARNING_RATE,
+                )
+            else:
+                predictor = QuaternionLSTMPredictor(
+                    sequence_length=config.SEQUENCE_LENGTH,
+                    n_features=config.N_FEATURES,
+                    lstm_units=config.LSTM_UNITS,
+                    dense_units=config.DENSE_UNITS,
+                    dropout_rate=config.DROPOUT_RATE,
+                    learning_rate=config.LEARNING_RATE,
+                    output_size=config.N_FEATURES,
+                    dual_stream=config.DUAL_STREAM,
+                    n_context_features=config.N_CONTEXT_FEATURES if config.DUAL_STREAM else 5,
+                    context_lstm_units=config.CONTEXT_LSTM_UNITS if config.DUAL_STREAM else 32,
+                    fusion_strategy=config.FUSION_STRATEGY if config.DUAL_STREAM else "film",
+                    fusion_dense_units=config.FUSION_DENSE_UNITS if config.DUAL_STREAM else 48,
+                    context_dropout_rate=config.CONTEXT_DROPOUT_RATE if config.DUAL_STREAM else 0.15,
+                )
             predictor.build_model()
             params = predictor.model.count_params()
             TRAINING_STATE["logs"].append(f"[SYSTEM] Model built — {params:,} parameters")

@@ -65,6 +65,9 @@ training.  Teaches the model to cope with imperfect context at inference."""
 # ──────────────────────────────────────────────
 # Model architecture
 # ──────────────────────────────────────────────
+MODEL_TYPE: str = "lstm"
+"""Architecture type to use ('lstm' or 'mtl')."""
+
 LSTM_UNITS: int = 64
 """Hidden units in the LSTM layer."""
 

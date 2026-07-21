@@ -30,6 +30,7 @@ from quaternion_encoder import (
     prepare_oscillator_data,
 )
 from lstm_model import QuaternionLSTMPredictor
+from mtl_model import MultiTaskQuaternionPredictor
 from signal_model import ResidualOscillator
 from model_analysis import (
     simulate_autoregressive,
@@ -147,29 +148,39 @@ def prepare_data(df):
     return data
 
 
-def build_model():
+def build_model(model_type="lstm"):
     """Build the LSTM model and display its summary."""
     use_dual = config.DUAL_STREAM
 
     print("\n" + "=" * 60)
-    print(f"  Step 5: Building {'Dual-Stream' if use_dual else 'Single-Stream'} LSTM Model")
+    print(f"  Step 5: Building {'Dual-Stream' if use_dual else 'Single-Stream'} {model_type.upper()} Model")
     print("=" * 60)
 
-    predictor = QuaternionLSTMPredictor(
-        sequence_length=config.SEQUENCE_LENGTH,
-        n_features=config.N_FEATURES,
-        lstm_units=config.LSTM_UNITS,
-        dense_units=config.DENSE_UNITS,
-        dropout_rate=config.DROPOUT_RATE,
-        learning_rate=config.LEARNING_RATE,
-        output_size=config.N_FEATURES,
-        dual_stream=use_dual,
-        n_context_features=config.N_CONTEXT_FEATURES if use_dual else 5,
-        context_lstm_units=config.CONTEXT_LSTM_UNITS if use_dual else 32,
-        fusion_strategy=config.FUSION_STRATEGY if use_dual else "film",
-        fusion_dense_units=config.FUSION_DENSE_UNITS if use_dual else 48,
-        context_dropout_rate=config.CONTEXT_DROPOUT_RATE if use_dual else 0.15,
-    )
+    if model_type == "mtl":
+        predictor = MultiTaskQuaternionPredictor(
+            sequence_length=config.SEQUENCE_LENGTH,
+            n_features=config.N_FEATURES,
+            lstm_units=config.LSTM_UNITS,
+            aux_dense_units=16,
+            dropout_rate=config.DROPOUT_RATE,
+            learning_rate=config.LEARNING_RATE,
+        )
+    else:
+        predictor = QuaternionLSTMPredictor(
+            sequence_length=config.SEQUENCE_LENGTH,
+            n_features=config.N_FEATURES,
+            lstm_units=config.LSTM_UNITS,
+            dense_units=config.DENSE_UNITS,
+            dropout_rate=config.DROPOUT_RATE,
+            learning_rate=config.LEARNING_RATE,
+            output_size=config.N_FEATURES,
+            dual_stream=use_dual,
+            n_context_features=config.N_CONTEXT_FEATURES if use_dual else 5,
+            context_lstm_units=config.CONTEXT_LSTM_UNITS if use_dual else 32,
+            fusion_strategy=config.FUSION_STRATEGY if use_dual else "film",
+            fusion_dense_units=config.FUSION_DENSE_UNITS if use_dual else 48,
+            context_dropout_rate=config.CONTEXT_DROPOUT_RATE if use_dual else 0.15,
+        )
     predictor.build_model()
 
     print(f"\n  Model Summary:")
@@ -262,7 +273,7 @@ def run_analysis(predictor, data, df):
     print(f"\n  Visualizations saved to '{config.VISUALIZATION_DIR}/'")
 
 
-def train_custom_model(epochs: int, save_path: str = "saved_models/custom_model.keras"):
+def train_custom_model(epochs: int, model_type: str = "lstm", save_path: str = "saved_models/custom_model.keras"):
     """Train the model for a user-specified number of epochs and save it."""
     setup_logging()
     print("\n" + "=" * 60)
@@ -274,7 +285,7 @@ def train_custom_model(epochs: int, save_path: str = "saved_models/custom_model.
     data = prepare_data(df)
 
     # Build model
-    predictor = build_model()
+    predictor = build_model(model_type=model_type)
 
     # Train
     print("\n  Starting training...")
@@ -419,7 +430,7 @@ def get_next_oscillator_signal(primary_predictor, oscillator, data, df):
     return next_signal[0, 0]
 
 
-def main(train: bool = TRAIN_ON_RUN, epochs: int = config.EPOCHS):
+def main(train: bool = TRAIN_ON_RUN, epochs: int = config.EPOCHS, model_type: str = "lstm"):
     """Run the full Quaternion LSTM Price Predictor pipeline."""
     setup_logging()
 
@@ -448,7 +459,7 @@ def main(train: bool = TRAIN_ON_RUN, epochs: int = config.EPOCHS):
     data = prepare_data(ohlcv_df)
 
     # 5. Build model
-    predictor = build_model()
+    predictor = build_model(model_type=model_type)
 
     # 6. Train (optional)
     if train:
@@ -491,13 +502,14 @@ if __name__ == "__main__":
     parser.add_argument("--train", action="store_true", help="Run the training pipeline")
     parser.add_argument("--epochs", type=int, default=config.EPOCHS, help="Number of epochs to train")
     parser.add_argument("--custom_train", action="store_true", help="Run the custom interactive training function")
+    parser.add_argument("--model", type=str, choices=["lstm", "mtl"], default="lstm", help="Choose model architecture to use")
 
     args = parser.parse_args()
 
     if args.custom_train:
         # Run the standalone function requested by the user
-        train_custom_model(epochs=args.epochs)
+        train_custom_model(epochs=args.epochs, model_type=args.model)
     else:
         # Use CLI args to override defaults if provided, else use TRAIN_ON_RUN
         should_train = args.train or TRAIN_ON_RUN
-        main(train=should_train, epochs=args.epochs)
+        main(train=should_train, epochs=args.epochs, model_type=args.model)

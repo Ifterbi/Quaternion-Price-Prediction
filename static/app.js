@@ -1002,6 +1002,7 @@
         setInputValue('cfg-ctx-dropout', cfg.dual_stream?.context_dropout_rate);
 
         // Model architecture
+        setInputValue('cfg-model-type', cfg.model_architecture?.model_type);
         setInputValue('cfg-lstm-units', cfg.model_architecture?.lstm_units);
         setInputValue('cfg-dense-units', cfg.model_architecture?.dense_units);
         setInputValue('cfg-dropout', cfg.model_architecture?.dropout_rate);
