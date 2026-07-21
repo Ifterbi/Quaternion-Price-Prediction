@@ -753,8 +753,8 @@ def _human_size(size_bytes: int) -> str:
 
 
 # ──────────────────────────────────────────────
-# Run with: uvicorn api:app --host 0.0.0.0 --port 8000
+# Run with: uvicorn api:app --host 127.0.0.1 --port 8000
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
