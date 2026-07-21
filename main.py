@@ -193,6 +193,8 @@ def run_training(predictor, data):
     # Evaluate on test set
     metrics = predictor.evaluate(X_test, data["y_test"])
     print(f"\n  Test Loss (MSE): {metrics['loss']:.6f}")
+    if "main_loss" in metrics:
+        print(f"  Test Main Loss:  {metrics['main_loss']:.6f}")
     print(f"  Test MAE:        {metrics['mae']:.6f}")
 
     return history, metrics

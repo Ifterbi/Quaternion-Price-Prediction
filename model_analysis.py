@@ -50,7 +50,7 @@ def simulate_autoregressive(
     Returns:
         Array of decoded close prices of shape (n_steps,).
     """
-    is_dual = predictor.dual_stream
+    is_dual = getattr(predictor, "dual_stream", False)
     logger.info(
         "Running pure auto-regressive simulation for %d steps "
         "(dual_stream=%s)",
@@ -110,7 +110,7 @@ def simulate_teacher_forcing(
     Returns:
         Array of decoded close prices of shape (N,).
     """
-    is_dual = predictor.dual_stream
+    is_dual = getattr(predictor, "dual_stream", False)
     logger.info(
         "Running teacher-forced prediction on %d sequences (dual_stream=%s)",
         len(X_test),
