@@ -24,6 +24,8 @@ try:
                 if signals:
                     print(f"Signals type: {signals.get('type')}")
                     print(f"Signals values count: {len(signals.get('values', []))}")
+                    print(f"Values sample: {signals.get('values', [])[:5]}")
+                    print(f"Buy threshold: {signals.get('buy_threshold')}")
                     print(f"Buy threshold: {signals.get('buy_threshold')}")
                 else:
                     print("No signals found in response!")

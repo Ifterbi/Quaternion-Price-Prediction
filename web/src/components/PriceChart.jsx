@@ -115,8 +115,12 @@ export default function PriceChart({ data, showSignal = true }) {
              if (ps > pb && ps > 0.4) return 'rgba(239, 68, 68, 0.15)'; // Red
              return 'rgba(234, 179, 8, 0.15)'; // Yellow
         } else if (signalType === 'threshold') {
-             if (s >= buyThresh) return 'rgba(34, 197, 94, 0.15)'; // Green
-             if (s <= sellThresh) return 'rgba(239, 68, 68, 0.15)'; // Red
+             // Use the same sigmoid logic as the loss function to handle inverted thresholds
+             const buySig = 1 / (1 + Math.exp(-(s - buyThresh) * 10.0));
+             const sellSig = 1 / (1 + Math.exp(-(sellThresh - s) * 10.0));
+             const tradeSig = buySig - sellSig;
+             if (tradeSig > 0.5) return 'rgba(34, 197, 94, 0.15)'; // Green
+             if (tradeSig < -0.5) return 'rgba(239, 68, 68, 0.15)'; // Red
              return 'rgba(234, 179, 8, 0.15)'; // Yellow
         } else {
              if (s > resMean + resStd * 0.5) return 'rgba(34, 197, 94, 0.15)'; // Green
