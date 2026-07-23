@@ -51,20 +51,32 @@ def simulate_autoregressive(
         Array of decoded close prices of shape (n_steps,).
     """
     is_dual = getattr(predictor, "dual_stream", False)
+    is_extended = isinstance(initial_sequence, list) and len(initial_sequence) == 3
+    
     logger.info(
         "Running pure auto-regressive simulation for %d steps "
-        "(dual_stream=%s)",
+        "(dual_stream=%s, extended_mtl=%s)",
         n_steps,
         is_dual,
+        is_extended,
     )
 
-    current_price_seq = initial_sequence.copy()
-    current_ctx_seq = initial_context.copy() if initial_context is not None else None
+    if is_extended:
+        current_price_seq = initial_sequence[0].copy()
+        current_ctx_seq = initial_sequence[1].copy()
+        current_q_state = initial_sequence[2].copy()
+    else:
+        current_price_seq = initial_sequence.copy()
+        current_ctx_seq = initial_context.copy() if initial_context is not None else None
+        current_q_state = None
+        
     predictions_scaled = []
 
     for _ in range(n_steps):
         # Build model input
-        if is_dual and current_ctx_seq is not None:
+        if is_extended:
+            model_input = [current_price_seq, current_ctx_seq, current_q_state]
+        elif is_dual and current_ctx_seq is not None:
             model_input = [current_price_seq, current_ctx_seq]
         else:
             model_input = current_price_seq
@@ -80,7 +92,13 @@ def simulate_autoregressive(
         )
 
         # Slide the context window: repeat last known context forward
-        if is_dual and current_ctx_seq is not None:
+        if is_extended:
+            last_ctx = current_ctx_seq[:, -1:, :]
+            current_ctx_seq = np.concatenate(
+                (current_ctx_seq[:, 1:, :], last_ctx), axis=1
+            )
+            current_q_state = next_q
+        elif is_dual and current_ctx_seq is not None:
             last_ctx = current_ctx_seq[:, -1:, :]  # (1, 1, n_ctx)
             current_ctx_seq = np.concatenate(
                 (current_ctx_seq[:, 1:, :], last_ctx), axis=1
@@ -111,13 +129,18 @@ def simulate_teacher_forcing(
         Array of decoded close prices of shape (N,).
     """
     is_dual = getattr(predictor, "dual_stream", False)
+    is_extended = isinstance(X_test, list) and len(X_test) == 3
+    
     logger.info(
-        "Running teacher-forced prediction on %d sequences (dual_stream=%s)",
-        len(X_test),
+        "Running teacher-forced prediction on %d sequences (dual_stream=%s, extended_mtl=%s)",
+        len(X_test[0]) if is_extended else len(X_test),
         is_dual,
+        is_extended
     )
 
-    if is_dual and ctx_X_test is not None:
+    if is_extended:
+        model_input = X_test
+    elif is_dual and ctx_X_test is not None:
         model_input = [X_test, ctx_X_test]
     else:
         model_input = X_test

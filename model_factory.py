@@ -5,6 +5,7 @@ from typing import Optional
 import config
 from lstm_model import QuaternionLSTMPredictor
 from mtl_model import MultiTaskQuaternionPredictor
+from extended_mtl_model import ExtendedMTLPredictor
 
 def build_primary_model(model_type: Optional[str] = None):
     """
@@ -18,6 +19,15 @@ def build_primary_model(model_type: Optional[str] = None):
     
     if m_type == "mtl":
         predictor = MultiTaskQuaternionPredictor(
+            sequence_length=config.SEQUENCE_LENGTH,
+            n_features=config.N_FEATURES,
+            lstm_units=config.LSTM_UNITS,
+            aux_dense_units=16,
+            dropout_rate=config.DROPOUT_RATE,
+            learning_rate=config.LEARNING_RATE,
+        )
+    elif m_type == "extended_mtl":
+        predictor = ExtendedMTLPredictor(
             sequence_length=config.SEQUENCE_LENGTH,
             n_features=config.N_FEATURES,
             lstm_units=config.LSTM_UNITS,

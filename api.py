@@ -40,6 +40,7 @@ from quaternion_encoder import (
     compute_residuals,
     prepare_oscillator_data,
 )
+from extended_encoder import prepare_extended_training_data
 from model_factory import build_primary_model
 from signal_model import ResidualOscillator
 from model_analysis import (
@@ -141,22 +142,14 @@ class TrainingStateCallback(tf.keras.callbacks.Callback):
 # ──────────────────────────────────────────────
 app = FastAPI(title="Quaternion AI Predictor", version="1.0.0")
 
-# Serve static files
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
+# Serve static files (React build)
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "web", "dist")
+if os.path.exists(STATIC_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
 
 # ──────────────────────────────────────────────
 # Routes
 # ──────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
-    """Serve the main dashboard HTML."""
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    with open(index_path, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
 
 # ── Config Endpoints ──────────────────────────
 
@@ -350,12 +343,16 @@ async def search_ticker(q: str = Query(..., min_length=1)):
 # ── Inference / Data Endpoint ─────────────────
 
 @app.get("/api/data")
-async def get_prediction_data(models: List[str] = Query(default=[])):
+async def get_prediction_data(
+    models: List[str] = Query(default=[]),
+    oscillator: Optional[str] = Query(default=None),
+    ticker: Optional[str] = Query(default=None)
+):
     """Run full inference pipeline and return prediction data for charts."""
     try:
         # 1. Fetch OHLCV data
         ohlcv_df = get_ohlcv(fetch_bitcoin_data(
-            ticker_primary=config.TICKER_PRIMARY,
+            ticker_primary=ticker if ticker else config.TICKER_PRIMARY,
             ticker_fallback=config.TICKER_FALLBACK,
             start=config.DEFAULT_START_DATE,
             interval=config.DEFAULT_INTERVAL,
@@ -396,6 +393,8 @@ async def get_prediction_data(models: List[str] = Query(default=[])):
             
             if temp_model.name == "MTLQuaternionPredictor":
                 mod_type = "mtl"
+            elif temp_model.name == "ExtendedMTLPredictor":
+                mod_type = "extended_mtl"
             else:
                 mod_type = "lstm"
                 
@@ -405,7 +404,8 @@ async def get_prediction_data(models: List[str] = Query(default=[])):
             loaded_models.append({
                 "filename": model_filename,
                 "predictor": predictor,
-                "seq_len": seq_len
+                "seq_len": seq_len,
+                "mod_type": mod_type
             })
             
         if not loaded_models:
@@ -432,23 +432,36 @@ async def get_prediction_data(models: List[str] = Query(default=[])):
             model_filename = m_info["filename"]
             predictor = m_info["predictor"]
             seq_len = m_info["seq_len"]
+            m_mod_type = m_info.get("mod_type", "lstm")
             
-            m_data = prepare_training_data(
-                ohlcv_df,
-                sequence_length=seq_len,
-                train_split=config.TRAIN_TEST_SPLIT,
-                use_path_deltas=False,
-                dual_stream=True,
-                volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
-            )
+            if m_mod_type == "extended_mtl":
+                m_data = prepare_extended_training_data(
+                    ohlcv_df,
+                    sequence_length=seq_len,
+                    train_split=config.TRAIN_TEST_SPLIT,
+                )
+            else:
+                m_data = prepare_training_data(
+                    ohlcv_df,
+                    sequence_length=seq_len,
+                    train_split=config.TRAIN_TEST_SPLIT,
+                    use_path_deltas=False,
+                    dual_stream=True,
+                    volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
+                )
             
             X_test_m = m_data["X_test"]
             ctx_X_test_m = m_data.get("ctx_X_test")
             
             # Predict
-            predicted_prices = simulate_teacher_forcing(
-                predictor, global_scaler, X_test_m, ctx_X_test=ctx_X_test_m,
-            )
+            if m_mod_type == "extended_mtl":
+                predicted_prices = simulate_teacher_forcing(
+                    predictor, global_scaler, X_test_m
+                )
+            else:
+                predicted_prices = simulate_teacher_forcing(
+                    predictor, global_scaler, X_test_m, ctx_X_test=ctx_X_test_m,
+                )
             
             # Calculate alignment padding (how many points this model is missing compared to the max_test_points)
             padding_needed = max_test_points - len(predicted_prices)
@@ -464,20 +477,33 @@ async def get_prediction_data(models: List[str] = Query(default=[])):
                 "metrics": {k: round(float(v), 4) for k, v in metrics.items()}
             })
             
-            if "primary_predictor" not in locals():
+            if model_filename == models[0]:
                 primary_predictor = predictor
-                data = reference_data  # Save for oscillator
+                data = m_data  # Save for oscillator
 
         # 7. Oscillator signals (using the first loaded model's residuals)
         signals = []
         next_signal = 0.0
         if "primary_predictor" in locals():
-            osc_path = os.path.join(config.MODEL_SAVE_DIR, ACTIVE_MODELS["oscillator"])
+            osc_name = oscillator if oscillator else ACTIVE_MODELS.get("oscillator", "")
+            osc_path = os.path.join(config.MODEL_SAVE_DIR, osc_name)
             if os.path.exists(osc_path):
                 try:
-                    X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
-                    y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
-                    ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
+                    if m_mod_type == "extended_mtl":
+                        X_all = [
+                            np.concatenate([data["X_train"][0], data["X_test"][0]], axis=0),
+                            np.concatenate([data["X_train"][1], data["X_test"][1]], axis=0),
+                            np.concatenate([data["X_train"][2], data["X_test"][2]], axis=0)
+                        ]
+                        y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+                        ctx_X_all = None
+                    else:
+                        X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
+                        if isinstance(data["y_train"], dict):
+                            y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+                        else:
+                            y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
+                        ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
     
                     residuals, pred_q = compute_residuals(
                         primary_predictor, X_all, y_all, global_scaler, ctx_X_test=ctx_X_all
@@ -504,16 +530,27 @@ async def get_prediction_data(models: List[str] = Query(default=[])):
                     signals = test_signals.flatten().tolist()
     
                     # Next signal
-                    last_x = data["X_test"][-1:]
-                    last_ctx = data["ctx_X_test"][-1:]
-                    model_input = [last_x, last_ctx]
+                    if m_mod_type == "extended_mtl":
+                        model_input = [
+                            data["X_test"][0][-1:],
+                            data["X_test"][1][-1:],
+                            data["X_test"][2][-1:]
+                        ]
+                    else:
+                        last_x = data["X_test"][-1:]
+                        if "ctx_X_test" in data:
+                            last_ctx = data["ctx_X_test"][-1:]
+                            model_input = [last_x, last_ctx]
+                        else:
+                            model_input = last_x
+
                     next_q = primary_predictor.predict(model_input)
     
                     recent_residuals = residuals[-config.OSCILLATOR_SEQ_LEN:]
                     recent_residuals = recent_residuals.reshape(1, config.OSCILLATOR_SEQ_LEN, 1).astype(np.float32)
                     next_signal = float(oscillator.predict(recent_residuals, next_q)[0, 0])
                 except Exception as e:
-                    logger.warning("Oscillator inference failed: %s", e)
+                    logger.warning("Oscillator inference failed: %s", e, exc_info=True)
                     signals = []
                     next_signal = 0.0
 
@@ -546,6 +583,7 @@ async def start_training(
     epochs: Optional[int] = None,
     oscillator_epochs: Optional[int] = None,
     model_name: Optional[str] = Query("best_model", description="Base name for saved models"),
+    model_type: Optional[str] = Query(None, description="Model architecture type"),
 ):
     """Start background training for both primary and oscillator models."""
     if TRAINING_STATE["is_training"]:
@@ -553,6 +591,7 @@ async def start_training(
 
     train_epochs = epochs or config.EPOCHS
     osc_epochs = oscillator_epochs or config.OSCILLATOR_EPOCHS
+    arch_type = model_type or config.MODEL_TYPE
 
     def _train_background():
         try:
@@ -577,14 +616,21 @@ async def start_training(
 
             # 2. Prepare training data
             TRAINING_STATE["logs"].append("[SYSTEM] Preparing training sequences...")
-            data = prepare_training_data(
-                ohlcv_df,
-                sequence_length=config.SEQUENCE_LENGTH,
-                train_split=config.TRAIN_TEST_SPLIT,
-                use_path_deltas=False,
-                dual_stream=config.DUAL_STREAM,
-                volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
-            )
+            if arch_type == "extended_mtl":
+                data = prepare_extended_training_data(
+                    ohlcv_df,
+                    sequence_length=config.SEQUENCE_LENGTH,
+                    train_split=config.TRAIN_TEST_SPLIT,
+                )
+            else:
+                data = prepare_training_data(
+                    ohlcv_df,
+                    sequence_length=config.SEQUENCE_LENGTH,
+                    train_split=config.TRAIN_TEST_SPLIT,
+                    use_path_deltas=False,
+                    dual_stream=config.DUAL_STREAM,
+                    volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20,
+                )
             info = data["encoding_info"]
             TRAINING_STATE["logs"].append(
                 f"[SYSTEM] Sequences ready — Train: {info['train_samples']}, Test: {info['test_samples']}"
@@ -592,7 +638,7 @@ async def start_training(
 
             # 3. Build primary model
             TRAINING_STATE["logs"].append("[SYSTEM] Building primary model...")
-            predictor = build_primary_model(config.MODEL_TYPE)
+            predictor = build_primary_model(arch_type)
             params = predictor.model.count_params()
             TRAINING_STATE["logs"].append(f"[SYSTEM] Model built — {params:,} parameters")
 
@@ -631,9 +677,21 @@ async def start_training(
             TRAINING_STATE["total_epochs"] = osc_epochs
             TRAINING_STATE["logs"].append("[OSCILLATOR] Computing residuals...")
 
-            X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
-            y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
-            ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0) if use_dual else None
+            if arch_type == "extended_mtl":
+                X_all = [
+                    np.concatenate([data["X_train"][0], data["X_test"][0]], axis=0),
+                    np.concatenate([data["X_train"][1], data["X_test"][1]], axis=0),
+                    np.concatenate([data["X_train"][2], data["X_test"][2]], axis=0)
+                ]
+                y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+                ctx_X_all = None
+            else:
+                X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
+                if isinstance(data["y_train"], dict):
+                    y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+                else:
+                    y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
+                ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0) if use_dual else None
 
             residuals, pred_q = compute_residuals(
                 predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all
@@ -645,12 +703,21 @@ async def start_training(
                 train_split=config.TRAIN_TEST_SPLIT,
             )
 
-            oscillator = ResidualOscillator(
-                sequence_length=config.OSCILLATOR_SEQ_LEN,
-                lstm_units=config.OSCILLATOR_LSTM_UNITS,
-                dense_units=config.OSCILLATOR_DENSE_UNITS,
-                learning_rate=config.OSCILLATOR_LEARNING_RATE,
-            )
+            if arch_type == "extended_mtl":
+                from extended_signal_model import FeedbackOscillator
+                oscillator = FeedbackOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                    learning_rate=config.OSCILLATOR_LEARNING_RATE,
+                )
+            else:
+                oscillator = ResidualOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                    learning_rate=config.OSCILLATOR_LEARNING_RATE,
+                )
             oscillator.build_model()
 
             TRAINING_STATE["logs"].append(f"[OSCILLATOR] Starting training — {osc_epochs} epochs")
@@ -793,6 +860,20 @@ def _human_size(size_bytes: int) -> str:
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
     return f"{size_bytes:.1f} TB"
+
+from fastapi import Request
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def serve_frontend(request: Request, full_path: str):
+    """Serve the React app for all non-API routes."""
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+        
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="React build not found. Run 'npm run build' in web directory.")
 
 
 # ──────────────────────────────────────────────

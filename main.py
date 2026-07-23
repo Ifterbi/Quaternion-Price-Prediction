@@ -31,6 +31,8 @@ from quaternion_encoder import (
 )
 from model_factory import build_primary_model
 from signal_model import ResidualOscillator
+import extended_encoder
+from extended_signal_model import FeedbackOscillator, ExtendedPipeline
 from model_analysis import (
     simulate_autoregressive,
     simulate_teacher_forcing,
@@ -112,7 +114,7 @@ def compute_path(scaled_data):
     return path_deltas
 
 
-def prepare_data(df):
+def prepare_data(df, model_type="lstm"):
     """Run the full data preparation pipeline."""
     use_dual = config.DUAL_STREAM
 
@@ -120,14 +122,29 @@ def prepare_data(df):
     print(f"  Step 4: Preparing Training Sequences ({'dual-stream' if use_dual else 'single-stream'})")
     print("=" * 60)
 
-    data = prepare_training_data(
-        df,
-        sequence_length=config.SEQUENCE_LENGTH,
-        train_split=config.TRAIN_TEST_SPLIT,
-        use_path_deltas=False,
-        dual_stream=use_dual,
-        volume_ma_window=config.VOLUME_MA_WINDOW if use_dual else 20,
-    )
+    if model_type == "extended_mtl":
+        data = extended_encoder.prepare_extended_training_data(
+            df,
+            sequence_length=config.SEQUENCE_LENGTH,
+            train_split=config.TRAIN_TEST_SPLIT,
+            volume_ma_window=config.VOLUME_MA_WINDOW if use_dual else 20,
+        )
+        info = {
+            "sequence_length": config.SEQUENCE_LENGTH,
+            "total_samples": len(data["X_train"][0]) + len(data["X_test"][0]),
+            "train_samples": len(data["X_train"][0]),
+            "test_samples": len(data["X_test"][0]),
+        }
+        data["encoding_info"] = info
+    else:
+        data = prepare_training_data(
+            df,
+            sequence_length=config.SEQUENCE_LENGTH,
+            train_split=config.TRAIN_TEST_SPLIT,
+            use_path_deltas=False,
+            dual_stream=use_dual,
+            volume_ma_window=config.VOLUME_MA_WINDOW if use_dual else 20,
+        )
 
     info = data["encoding_info"]
     print(f"\n  Sequence length:  {info['sequence_length']}")
@@ -135,12 +152,19 @@ def prepare_data(df):
     print(f"  Total sequences:  {info['total_samples']}")
     print(f"  Training samples: {info['train_samples']}")
     print(f"  Test samples:     {info['test_samples']}")
-    print(f"  X_train shape:    {data['X_train'].shape}")
-    print(f"  y_train shape:    {data['y_train'].shape}")
-    print(f"  X_test shape:     {data['X_test'].shape}")
-    print(f"  y_test shape:     {data['y_test'].shape}")
+    
+    if model_type == "extended_mtl":
+        print(f"  X_train shape:    {data['X_train'][0].shape}")
+        print(f"  y_train shape:    {data['y_train']['out_main'].shape}")
+        print(f"  X_test shape:     {data['X_test'][0].shape}")
+        print(f"  y_test shape:     {data['y_test']['out_main'].shape}")
+    else:
+        print(f"  X_train shape:    {data['X_train'].shape}")
+        print(f"  y_train shape:    {data['y_train'].shape}")
+        print(f"  X_test shape:     {data['X_test'].shape}")
+        print(f"  y_test shape:     {data['y_test'].shape}")
 
-    if use_dual:
+    if use_dual and model_type != "extended_mtl":
         print(f"  ctx_X_train shape: {data['ctx_X_train'].shape}")
         print(f"  ctx_X_test shape:  {data['ctx_X_test'].shape}")
 
@@ -174,8 +198,11 @@ def run_training(predictor, data):
     print("  Step 6: Training")
     print("=" * 60)
 
-    # Pack inputs for dual-stream
-    if use_dual and "ctx_X_train" in data:
+    # Pack inputs for dual-stream or extended_mtl
+    if isinstance(data["X_train"], list):
+        X_train = data["X_train"]
+        X_test = data["X_test"]
+    elif use_dual and "ctx_X_train" in data:
         X_train = [data["X_train"], data["ctx_X_train"]]
         X_test = [data["X_test"], data["ctx_X_test"]]
     else:
@@ -214,7 +241,10 @@ def run_analysis(predictor, data, df):
     ctx_X_test = data.get("ctx_X_test") if use_dual else None
 
     # 1. Get actual prices for test set
-    actual_prices = decode_quaternion_to_price(y_test, scaler)
+    if isinstance(y_test, dict):
+        actual_prices = decode_quaternion_to_price(y_test["out_main"], scaler)
+    else:
+        actual_prices = decode_quaternion_to_price(y_test, scaler)
 
     # 2. Teacher-forcing simulation
     preds_tf = simulate_teacher_forcing(
@@ -222,11 +252,20 @@ def run_analysis(predictor, data, df):
     )
 
     # 3. Pure auto-regressive simulation
-    # Use the first sequence of X_test as the starting point
-    initial_seq = X_test[0:1]  # shape (1, seq_len, 4)
-    initial_ctx = ctx_X_test[0:1] if ctx_X_test is not None else None
+    if isinstance(X_test, list) and len(X_test) == 3:
+        initial_seq = [
+            X_test[0][0:1],
+            X_test[1][0:1],
+            X_test[2][0:1]
+        ]
+        initial_ctx = None
+    else:
+        # Use the first sequence of X_test as the starting point
+        initial_seq = X_test[0:1]  # shape (1, seq_len, 4)
+        initial_ctx = ctx_X_test[0:1] if ctx_X_test is not None else None
+        
     preds_ar = simulate_autoregressive(
-        predictor, scaler, initial_seq, n_steps=len(X_test),
+        predictor, scaler, initial_seq, n_steps=len(X_test[0]) if isinstance(X_test, list) else len(X_test),
         initial_context=initial_ctx,
     )
 
@@ -243,7 +282,8 @@ def run_analysis(predictor, data, df):
 
     # 5. Plot results
     # Get the corresponding dates for the test set
-    test_dates = df.index[-len(X_test):]
+    n_test_samples = len(X_test[0]) if isinstance(X_test, list) else len(X_test)
+    test_dates = df.index[-n_test_samples:]
 
     plot_results(test_dates, actual_prices, preds_ar, preds_tf)
     print(f"\n  Visualizations saved to '{config.VISUALIZATION_DIR}/'")
@@ -258,7 +298,7 @@ def train_custom_model(epochs: int, model_type: str = "lstm", save_path: str = "
 
     # Fetch and prepare data
     df = fetch_data()
-    data = prepare_data(df)
+    data = prepare_data(df, model_type)
 
     # Build model
     predictor = build_model(model_type=model_type)
@@ -302,13 +342,25 @@ def train_oscillator_model(primary_predictor, data, ohlcv_df):
     # but here we'll use the whole dataset for demonstration)
     
     # Let's run the whole dataset through the primary model to get max training data for oscillator
-    X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
-    y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
-    
-    if config.DUAL_STREAM:
-        ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
-    else:
+    if isinstance(data["X_train"], list) and len(data["X_train"]) == 3:
+        X_all = [
+            np.concatenate([data["X_train"][0], data["X_test"][0]], axis=0),
+            np.concatenate([data["X_train"][1], data["X_test"][1]], axis=0),
+            np.concatenate([data["X_train"][2], data["X_test"][2]], axis=0)
+        ]
+        y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
         ctx_X_all = None
+    else:
+        X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
+        if isinstance(data["y_train"], dict):
+            y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+        else:
+            y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
+            
+        if config.DUAL_STREAM:
+            ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
+        else:
+            ctx_X_all = None
         
     residuals, pred_q = compute_residuals(primary_predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all)
     
@@ -321,12 +373,20 @@ def train_oscillator_model(primary_predictor, data, ohlcv_df):
     )
     
     # 3. Build and train
-    oscillator = ResidualOscillator(
-        sequence_length=config.OSCILLATOR_SEQ_LEN,
-        lstm_units=config.OSCILLATOR_LSTM_UNITS,
-        dense_units=config.OSCILLATOR_DENSE_UNITS,
-        learning_rate=config.OSCILLATOR_LEARNING_RATE
-    )
+    if isinstance(data["X_train"], list) and len(data["X_train"]) == 3:
+        oscillator = FeedbackOscillator(
+            sequence_length=config.OSCILLATOR_SEQ_LEN,
+            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+            dense_units=config.OSCILLATOR_DENSE_UNITS,
+            learning_rate=config.OSCILLATOR_LEARNING_RATE
+        )
+    else:
+        oscillator = ResidualOscillator(
+            sequence_length=config.OSCILLATOR_SEQ_LEN,
+            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+            dense_units=config.OSCILLATOR_DENSE_UNITS,
+            learning_rate=config.OSCILLATOR_LEARNING_RATE
+        )
     
     oscillator.build_model()
     print("\nResidual Oscillator Summary:")
@@ -383,19 +443,37 @@ def get_next_oscillator_signal(primary_predictor, oscillator, data, df):
     # 2. The primary model's prediction for tomorrow
     
     # Run the last available window through the primary model
-    seq_len = config.SEQUENCE_LENGTH
-    last_x = data["X_test"][-1:] # Shape (1, 60, 4)
-    last_ctx = data["ctx_X_test"][-1:] if config.DUAL_STREAM else None
-    
-    model_input = [last_x, last_ctx] if last_ctx is not None else last_x
+    if isinstance(data["X_test"], list) and len(data["X_test"]) == 3:
+        model_input = [
+            data["X_test"][0][-1:],
+            data["X_test"][1][-1:],
+            data["X_test"][2][-1:]
+        ]
+    else:
+        last_x = data["X_test"][-1:] # Shape (1, 60, 4)
+        last_ctx = data["ctx_X_test"][-1:] if config.DUAL_STREAM else None
+        model_input = [last_x, last_ctx] if last_ctx is not None else last_x
+        
     next_q = primary_predictor.predict(model_input) # Shape (1, 4)
     
     # Get recent residuals
     # We'll just grab the most recent residuals from the training/test set
     # Using the test set residuals we already computed
-    X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
-    y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
-    ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0) if config.DUAL_STREAM else None
+    if isinstance(data["X_train"], list) and len(data["X_train"]) == 3:
+        X_all = [
+            np.concatenate([data["X_train"][0], data["X_test"][0]], axis=0),
+            np.concatenate([data["X_train"][1], data["X_test"][1]], axis=0),
+            np.concatenate([data["X_train"][2], data["X_test"][2]], axis=0)
+        ]
+        y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+        ctx_X_all = None
+    else:
+        X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
+        if isinstance(data["y_train"], dict):
+            y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+        else:
+            y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
+        ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0) if config.DUAL_STREAM else None
     
     residuals, _ = compute_residuals(primary_predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all)
     
@@ -432,7 +510,7 @@ def main(train: bool = TRAIN_ON_RUN, epochs: int = config.EPOCHS, model_type: st
     path_deltas = compute_path(scaled_data)
 
     # 4. Prepare training sequences
-    data = prepare_data(ohlcv_df)
+    data = prepare_data(ohlcv_df, model_type)
 
     # 5. Build model
     predictor = build_model(model_type=model_type)
@@ -471,6 +549,8 @@ def main(train: bool = TRAIN_ON_RUN, epochs: int = config.EPOCHS, model_type: st
         print(f"  Context dropout:   {config.CONTEXT_DROPOUT_RATE:.0%}")
     elif model_type == "mtl":
         print(f"  Architecture:      Multi-Task Learning (MTL)")
+    elif model_type == "extended_mtl":
+        print(f"  Architecture:      Extended Multi-Task Learning (Momentum-Rotation)")
     else:
         print(f"  Architecture:      Single-Stream LSTM")
     print()
@@ -482,7 +562,7 @@ if __name__ == "__main__":
     parser.add_argument("--train", action="store_true", help="Run the training pipeline")
     parser.add_argument("--epochs", type=int, default=config.EPOCHS, help="Number of epochs to train")
     parser.add_argument("--custom_train", action="store_true", help="Run the custom interactive training function")
-    parser.add_argument("--model", type=str, choices=["lstm", "mtl"], default="lstm", help="Choose model architecture to use")
+    parser.add_argument("--model", type=str, choices=["lstm", "mtl", "extended_mtl"], default="lstm", help="Choose model architecture to use")
 
     args = parser.parse_args()
 

@@ -11,7 +11,7 @@ import os
 # ──────────────────────────────────────────────
 # Ticker / data settings
 # ──────────────────────────────────────────────
-TICKER_PRIMARY: str = "F"
+TICKER_PRIMARY: str = "BTC-USD"
 """Primary ticker symbol to fetch from Yahoo Finance. (Ford Motor Co)"""
 
 TICKER_FALLBACK: str = "CAT"
