@@ -3,6 +3,7 @@ import AppLayout from './layouts/AppLayout';
 import Dashboard from './pages/Dashboard';
 import Models from './pages/Models';
 import Training from './pages/Training';
+import Oscillator from './pages/Oscillator';
 import './index.css';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="oscillator" element={<Oscillator />} />
           <Route path="models" element={<Models />} />
           <Route path="training" element={<Training />} />
         </Route>

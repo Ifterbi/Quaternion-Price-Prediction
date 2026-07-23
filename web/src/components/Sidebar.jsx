@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { BarChart2, Brain, Zap } from 'lucide-react';
+import { BarChart2, Brain, Zap, Activity } from 'lucide-react';
 
 export default function Sidebar() {
   return (
@@ -18,7 +18,14 @@ export default function Sidebar() {
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
         >
           <BarChart2 className="nav-icon" size={20} />
-          <span>Dashboard</span>
+          <span>Price Predictor</span>
+        </NavLink>
+        <NavLink 
+          to="/oscillator" 
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+        >
+          <Activity className="nav-icon" size={20} />
+          <span>Oscillators</span>
         </NavLink>
         <NavLink 
           to="/models" 

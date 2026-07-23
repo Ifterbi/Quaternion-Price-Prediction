@@ -41,6 +41,7 @@ from quaternion_encoder import (
     prepare_oscillator_data,
 )
 from extended_encoder import prepare_extended_training_data
+from oscillator_data import prepare_oscillator_training_data
 from model_factory import build_primary_model
 from signal_model import ResidualOscillator
 from model_analysis import (
@@ -519,43 +520,63 @@ async def get_prediction_data(
                         internal_osc_type = "threshold"
                     elif osc_type_name == "FeedbackOscillator":
                         internal_osc_type = "residual" # fallback for feedback
+                    elif osc_type_name == "SelfLearningOscillator":
+                        internal_osc_type = "self_learning"
                     else:
                         internal_osc_type = "residual"
 
-                    osc_data = prepare_oscillator_data(
-                        residuals, pred_q,
-                        sequence_length=config.OSCILLATOR_SEQ_LEN,
-                        train_split=config.TRAIN_TEST_SPLIT,
-                        oscillator_type=internal_osc_type,
-                    )
-    
-                    if internal_osc_type == "classification":
-                        from signal_model import ClassificationOscillator
-                        oscillator = ClassificationOscillator(
+                    if internal_osc_type == "self_learning":
+                        osc_data_full = prepare_oscillator_training_data(
+                            ohlcv_df,
                             sequence_length=config.OSCILLATOR_SEQ_LEN,
-                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
-                            dense_units=config.OSCILLATOR_DENSE_UNITS,
+                            train_split=config.TRAIN_TEST_SPLIT
                         )
-                    elif internal_osc_type == "threshold":
-                        from signal_model import ThresholdOscillator
-                        oscillator = ThresholdOscillator(
-                            sequence_length=config.OSCILLATOR_SEQ_LEN,
-                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
-                            dense_units=config.OSCILLATOR_DENSE_UNITS,
-                        )
-                    elif osc_type_name == "FeedbackOscillator":
-                        from extended_signal_model import FeedbackOscillator
-                        oscillator = FeedbackOscillator(
+                        osc_data = {
+                            "X_res_test": osc_data_full["X_price_test"],
+                            "X_q_test": osc_data_full["X_q_test"]
+                        }
+                        
+                        from signal_model import SelfLearningOscillator
+                        oscillator = SelfLearningOscillator(
                             sequence_length=config.OSCILLATOR_SEQ_LEN,
                             lstm_units=config.OSCILLATOR_LSTM_UNITS,
                             dense_units=config.OSCILLATOR_DENSE_UNITS,
                         )
                     else:
-                        oscillator = ResidualOscillator(
+                        osc_data = prepare_oscillator_data(
+                            residuals, pred_q,
                             sequence_length=config.OSCILLATOR_SEQ_LEN,
-                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
-                            dense_units=config.OSCILLATOR_DENSE_UNITS,
+                            train_split=config.TRAIN_TEST_SPLIT,
+                            oscillator_type=internal_osc_type,
                         )
+        
+                        if internal_osc_type == "classification":
+                            from signal_model import ClassificationOscillator
+                            oscillator = ClassificationOscillator(
+                                sequence_length=config.OSCILLATOR_SEQ_LEN,
+                                lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                                dense_units=config.OSCILLATOR_DENSE_UNITS,
+                            )
+                        elif internal_osc_type == "threshold":
+                            from signal_model import ThresholdOscillator
+                            oscillator = ThresholdOscillator(
+                                sequence_length=config.OSCILLATOR_SEQ_LEN,
+                                lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                                dense_units=config.OSCILLATOR_DENSE_UNITS,
+                            )
+                        elif osc_type_name == "FeedbackOscillator":
+                            from extended_signal_model import FeedbackOscillator
+                            oscillator = FeedbackOscillator(
+                                sequence_length=config.OSCILLATOR_SEQ_LEN,
+                                lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                                dense_units=config.OSCILLATOR_DENSE_UNITS,
+                            )
+                        else:
+                            oscillator = ResidualOscillator(
+                                sequence_length=config.OSCILLATOR_SEQ_LEN,
+                                lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                                dense_units=config.OSCILLATOR_DENSE_UNITS,
+                            )
                     
                     oscillator.model = temp_osc
     
@@ -563,7 +584,14 @@ async def get_prediction_data(
                         osc_data["X_res_test"], osc_data["X_q_test"]
                     )
                     
-                    if internal_osc_type == "classification":
+                    if internal_osc_type == "self_learning" or internal_osc_type == "threshold":
+                        signals = {
+                            "type": "threshold",
+                            "values": [round(float(p[0]), 4) for p in test_signals],
+                            "buy_threshold": round(float(test_signals[-1, 1]), 4) if len(test_signals) > 0 else 0.5,
+                            "sell_threshold": round(float(test_signals[-1, 2]), 4) if len(test_signals) > 0 else -0.5,
+                        }
+                    elif internal_osc_type == "classification":
                         # Output format: {"type": "classification", "values": [...], "p_buy": [...], "p_sell": [...]}
                         signals = {
                             "type": "classification",
@@ -572,13 +600,7 @@ async def get_prediction_data(
                             "p_sell": [round(float(p[0]), 4) for p in test_signals],
                             "p_hold": [round(float(p[1]), 4) for p in test_signals]
                         }
-                    elif internal_osc_type == "threshold":
-                        signals = {
-                            "type": "threshold",
-                            "values": [round(float(p[0]), 4) for p in test_signals],
-                            "buy_threshold": round(float(test_signals[-1, 1]), 4) if len(test_signals) > 0 else 0.5,
-                            "sell_threshold": round(float(test_signals[-1, 2]), 4) if len(test_signals) > 0 else -0.5,
-                        }
+
                     else:
                         signals = {
                             "type": "residual",
@@ -602,9 +624,15 @@ async def get_prediction_data(
 
                     next_q = primary_predictor.predict(model_input)
     
-                    recent_residuals = residuals[-config.OSCILLATOR_SEQ_LEN:]
-                    recent_residuals = recent_residuals.reshape(1, config.OSCILLATOR_SEQ_LEN, 1).astype(np.float32)
-                    next_raw = oscillator.predict(recent_residuals, next_q)
+                    if internal_osc_type == "self_learning":
+                        recent_inputs = osc_data_full["X_price_test"][-1:]
+                        next_raw = oscillator.predict(recent_inputs, next_q)
+                        signals["type"] = "threshold" # Ensure we use threshold dict format
+                    else:
+                        recent_residuals = residuals[-config.OSCILLATOR_SEQ_LEN:]
+                        recent_residuals = recent_residuals.reshape(1, config.OSCILLATOR_SEQ_LEN, 1).astype(np.float32)
+                        next_raw = oscillator.predict(recent_residuals, next_q)
+                        
                     if isinstance(signals, dict) and signals["type"] == "classification":
                         next_signal = {
                             "value": float(next_raw[0, 2] - next_raw[0, 0]),

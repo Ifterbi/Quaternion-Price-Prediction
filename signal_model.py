@@ -282,6 +282,124 @@ class ThresholdOscillator(ResidualOscillator):
         self.model = model
         return model
 
+@keras.saving.register_keras_serializable()
+def actual_profit_loss(y_true, y_pred):
+    """
+    Custom loss that rewards trade signals that match actual future price changes.
+    y_true: the continuous actual future price change (or return).
+    y_pred: [osc_val, buy_thresh, sell_thresh]
+    """
+    osc_val = y_pred[:, 0:1]
+    buy_t = y_pred[:, 1:2]
+    sell_t = y_pred[:, 2:3]
+    
+    # Soft trade signals using sigmoid
+    # 1 if osc_val > buy_t, 0 otherwise
+    buy_signal = tf.sigmoid((osc_val - buy_t) * 10.0)
+    # 1 if osc_val < sell_t, 0 otherwise
+    sell_signal = tf.sigmoid((sell_t - osc_val) * 10.0)
+    
+    # Trade signal: 1 (long), -1 (short), 0 (hold)
+    trade_signal = buy_signal - sell_signal
+    
+    # Maximize profit: if trade_signal matches sign of y_true, profit > 0
+    profit = trade_signal * y_true
+    
+    # Adding a small MSE term to bound osc_val
+    mse = tf.square(y_true - osc_val)
+    
+    return -tf.reduce_mean(profit) + 0.1 * tf.reduce_mean(mse)
+
+class SelfLearningOscillator(ResidualOscillator):
+    """
+    Price Action Oscillator that learns its own formula from actual prices and predicted next Q.
+    Input 1: sequence of actual prices (or returns)
+    Input 2: predicted next quaternion
+    Outputs: [osc_val, buy_threshold, sell_threshold]
+    """
+    def build_model(self) -> Model:
+        # We redefine the first input to represent price/return history rather than residuals
+        price_input = Input(shape=(self.sequence_length, 1), name="price_seq")
+        h_price = LSTM(self.lstm_units, return_sequences=False, name="price_lstm")(price_input)
+        h_price = Dropout(0.2, name="price_dropout")(h_price)
+        
+        q_input = Input(shape=(4,), name="next_quaternion")
+        merged = Concatenate(name="concat_features")([h_price, q_input])
+        dense = Dense(self.dense_units, activation="relu", name="dense_1")(merged)
+        
+        osc_val = Dense(1, activation="tanh", name="raw_oscillator")(dense)
+        output = DynamicThresholdLayer(name="oscillator_out")(osc_val)
+        
+        model = Model(inputs=[price_input, q_input], outputs=output, name="SelfLearningOscillator")
+        optimizer = Adam(learning_rate=self.learning_rate)
+        model.compile(
+            optimizer=optimizer,
+            loss=actual_profit_loss,
+            metrics=["mae"]
+        )
+        self.model = model
+        return model
+
+    def train(
+        self,
+        data_dict: Dict[str, np.ndarray],
+        epochs: int = 20,
+        batch_size: int = 32,
+        validation_split: float = 0.1,
+        save_best: bool = True,
+        model_path: str = "saved_models/self_learning_oscillator.keras",
+        callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
+    ) -> tf.keras.callbacks.History:
+        if self.model is None:
+            raise RuntimeError("Model not built.")
+
+        internal_callbacks = [
+            EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True, verbose=1),
+            ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, min_lr=1e-5, verbose=1),
+        ]
+
+        if save_best:
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            internal_callbacks.append(
+                ModelCheckpoint(filepath=model_path, monitor="val_loss", save_best_only=True, verbose=1)
+            )
+
+        if callbacks:
+            internal_callbacks.extend(callbacks)
+
+        X_train = [data_dict["X_price_train"], data_dict["X_q_train"]]
+        y_train = data_dict["y_train"]
+
+        logger.info("Training SelfLearningOscillator for %d epochs...", epochs)
+        history = self.model.fit(
+            X_train,
+            y_train,
+            epochs=epochs,
+            batch_size=batch_size,
+            validation_split=validation_split,
+            callbacks=internal_callbacks,
+            verbose=1,
+        )
+        return history
+
+    def evaluate(self, data_dict: Dict[str, np.ndarray]) -> Dict[str, float]:
+        if self.model is None:
+            raise RuntimeError("Model not built.")
+            
+        X_test = [data_dict["X_price_test"], data_dict["X_q_test"]]
+        y_test = data_dict["y_test"]
+        
+        results = self.model.evaluate(X_test, y_test, verbose=0)
+        metrics = {"loss": results[0], "mae": results[1]}
+        
+        logger.info("SelfLearningOscillator Evaluation — Loss (Profit/MSE): %.6f, MAE: %.6f", metrics["loss"], metrics["mae"])
+        return metrics
+
+    def predict(self, price_seq: np.ndarray, next_q: np.ndarray) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("Model not built.")
+        return self.model.predict([price_seq, next_q], verbose=0)
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     

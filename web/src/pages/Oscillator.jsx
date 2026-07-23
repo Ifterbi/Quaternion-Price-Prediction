@@ -3,38 +3,34 @@ import axios from 'axios';
 import PriceChart from '../components/PriceChart';
 import MetricCard from '../components/MetricCard';
 
-export default function Dashboard() {
+export default function Oscillator() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  const [availablePrimaryModels, setAvailablePrimaryModels] = useState([]);
-  const [selectedModels, setSelectedModels] = useState([]);
+  const [availableOscillatorModels, setAvailableOscillatorModels] = useState([]);
+  const [selectedOscillator, setSelectedOscillator] = useState(null);
   
   const [tickerInput, setTickerInput] = useState('BTC-USD');
   const [activeTicker, setActiveTicker] = useState('BTC-USD');
   
-  // Fetch available models first
+  // Fetch available oscillator models first
   useEffect(() => {
     const fetchModels = async () => {
       try {
         const response = await axios.get('/api/models');
         
-        const primaryModels = response.data.models
-          .map(m => m.filename)
-          .filter(name => !name.toLowerCase().includes('oscillator') && !name.toLowerCase().startsWith('osc_'));
-          
         const oscillatorModels = response.data.models
           .map(m => m.filename)
           .filter(name => name.toLowerCase().includes('oscillator') || name.toLowerCase().startsWith('osc_'));
           
-        setAvailablePrimaryModels(primaryModels);
+        setAvailableOscillatorModels(oscillatorModels);
         
-        // Select active primary model by default
-        if (response.data.active?.primary) {
-          setSelectedModels([response.data.active.primary]);
-        } else if (primaryModels.length > 0) {
-          setSelectedModels([primaryModels[0]]);
+        // Select active oscillator model by default
+        if (response.data.active?.oscillator) {
+          setSelectedOscillator(response.data.active.oscillator);
+        } else if (oscillatorModels.length > 0) {
+          setSelectedOscillator(oscillatorModels[0]);
         }
       } catch (err) {
         console.error("Failed to fetch models", err);
@@ -43,16 +39,16 @@ export default function Dashboard() {
     fetchModels();
   }, []);
 
-  // Fetch prediction data when selected models change
+  // Fetch prediction data when selected oscillator changes
   useEffect(() => {
-    if (selectedModels.length === 0) return;
+    if (!selectedOscillator) return;
     
     const fetchData = async () => {
       setLoading(true);
       setError(null);
       try {
         const params = new URLSearchParams();
-        selectedModels.forEach(m => params.append('models', m));
+        params.append('oscillator', selectedOscillator);
         if (activeTicker) {
           params.append('ticker', activeTicker);
         }
@@ -66,24 +62,13 @@ export default function Dashboard() {
       }
     };
     fetchData();
-  }, [selectedModels, activeTicker]);
-
-  const togglePrimaryModel = (model) => {
-    setSelectedModels(prev => 
-      prev.includes(model) 
-        ? prev.filter(m => m !== model)
-        : [...prev, model]
-    );
-  };
-
-  // Find the primary model's metrics or fallback to the first available
-  const primaryMetrics = data?.model_predictions?.[0]?.metrics;
+  }, [selectedOscillator, activeTicker]);
 
   return (
-    <section className="section active" id="section-dashboard">
+    <section className="section active" id="section-oscillator">
       <div className="page-header">
-        <h2>Price Predictor</h2>
-        <p className="header-subtitle">Real-time primary model predictions</p>
+        <h2>Oscillator Comparison</h2>
+        <p className="header-subtitle">Evaluate trading indicators and self-learned signals</p>
       </div>
       
       {error && <p style={{ color: 'var(--danger)', marginBottom: '20px' }}>Error loading data: {error}</p>}
@@ -93,26 +78,25 @@ export default function Dashboard() {
           <div className="grid-4 metrics-row" id="metrics-row">
             <MetricCard label="Ticker" value={data.ticker || '—'} />
             <MetricCard label="Data Points" value={data.test_points || 0} />
-            <MetricCard label="MAE" value={primaryMetrics?.MAE ? primaryMetrics.MAE.toFixed(4) : '—'} />
+            <MetricCard 
+              label="Selected Oscillator" 
+              value={selectedOscillator ? selectedOscillator.replace('.keras', '') : '—'} 
+            />
+            <MetricCard 
+              label="Latest Signal" 
+              value={
+                  data.next_signal !== undefined 
+                      ? (typeof data.next_signal === 'number' 
+                          ? data.next_signal.toFixed(4) 
+                          : data.next_signal.value.toFixed(4))
+                      : '—'
+              } 
+            />
           </div>
 
           <div className="card" id="chart-card">
             <div className="card-header" style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <h3>Price Prediction Overlay</h3>
-              <div>
-                <strong style={{ display: 'block', marginBottom: '8px', fontSize: '0.85em', color: 'var(--text-muted)' }}>PRIMARY MODELS</strong>
-                <div className="model-pills-container" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                  {availablePrimaryModels.map(model => (
-                    <button 
-                      key={model}
-                      className={`btn btn-sm ${selectedModels.includes(model) ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => togglePrimaryModel(model)}
-                    >
-                      {model}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <h3>Oscillator Overlay</h3>
               
               <div>
                 <strong style={{ display: 'block', marginBottom: '8px', fontSize: '0.85em', color: 'var(--text-muted)' }}>TARGET ASSET</strong>
@@ -133,14 +117,33 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
+              
+              {availableOscillatorModels.length > 0 && (
+                <div>
+                  <strong style={{ display: 'block', marginBottom: '8px', fontSize: '0.85em', color: 'var(--text-muted)' }}>OSCILLATOR MODEL</strong>
+                  <div className="model-pills-container" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    {availableOscillatorModels.map(model => (
+                      <button 
+                        key={model}
+                        className={`btn btn-sm ${selectedOscillator === model ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setSelectedOscillator(model)}
+                      >
+                        {model}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
+            
             <div className="chart-container" style={{ position: 'relative', height: '500px', padding: '20px' }}>
               {loading && (
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(10, 14, 26, 0.7)', zIndex: 10 }}>
-                  <p>Loading predictions...</p>
+                  <p>Loading signals...</p>
                 </div>
               )}
-              <PriceChart data={data} />
+              {/* Force showSignal to true for this page */}
+              <PriceChart data={data} showSignal={true} />
             </div>
           </div>
         </>
