@@ -33,7 +33,7 @@ export default function Training() {
     axios.get('/api/models').then(res => {
       const primaryModels = res.data.models
         .map(m => m.filename)
-        .filter(name => !name.toLowerCase().includes('oscillator') && name.endsWith('.keras'));
+        .filter(name => !name.toLowerCase().includes('oscillator') && !name.toLowerCase().startsWith('osc_') && name.endsWith('.keras'));
       setAvailablePrimaryModels(primaryModels);
       if (res.data.active?.primary) {
         setSelectedPrimaryModel(res.data.active.primary);

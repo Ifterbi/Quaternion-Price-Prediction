@@ -24,11 +24,11 @@ export default function Dashboard() {
         
         const primaryModels = response.data.models
           .map(m => m.filename)
-          .filter(name => !name.toLowerCase().includes('oscillator'));
+          .filter(name => !name.toLowerCase().includes('oscillator') && !name.toLowerCase().startsWith('osc_'));
           
         const oscillatorModels = response.data.models
           .map(m => m.filename)
-          .filter(name => name.toLowerCase().includes('oscillator'));
+          .filter(name => name.toLowerCase().includes('oscillator') || name.toLowerCase().startsWith('osc_'));
           
         setAvailablePrimaryModels(primaryModels);
         setAvailableOscillatorModels(oscillatorModels);
