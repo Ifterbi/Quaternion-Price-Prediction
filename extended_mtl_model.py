@@ -11,6 +11,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Concatenate, Layer
 import logging
 from typing import Optional, Dict
+import numpy as np
 
 # Import the base class
 import mtl_model
