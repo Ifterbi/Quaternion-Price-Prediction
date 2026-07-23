@@ -280,23 +280,26 @@ def plot_oscillator_signals(
     ax1.tick_params(axis='y', labelcolor=color1)
     ax1.grid(True, alpha=0.3)
 
+    # Extract 1D signal values for plotting if multidimensional
+    plot_sigs = signals[:, 0] if signals.ndim > 1 else signals.flatten()
+
     ax2 = ax1.twinx()
     color2 = 'purple'
     ax2.set_ylabel('Divergence Momentum [-1, 1]', color=color2, fontsize=12)
-    ax2.plot(dates, signals, color=color2, label='Momentum Signal', alpha=0.7, linestyle='-')
+    ax2.plot(dates, plot_sigs, color=color2, label='Momentum Signal', alpha=0.7, linestyle='-')
     ax2.axhline(y=0, color='gray', linestyle=':', alpha=0.8)
     
     # Highlight momentum zones based on the signal across the entire vertical axis
     ax1.fill_between(
         dates, 0, 1, 
-        where=(signals.flatten() > 0), 
+        where=(plot_sigs > 0), 
         color='red', alpha=0.1, 
         label='Upward Divergence', 
         transform=ax1.get_xaxis_transform()
     )
     ax1.fill_between(
         dates, 0, 1, 
-        where=(signals.flatten() < 0), 
+        where=(plot_sigs < 0), 
         color='green', alpha=0.1, 
         label='Downward Divergence', 
         transform=ax1.get_xaxis_transform()

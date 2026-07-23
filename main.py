@@ -336,13 +336,16 @@ def train_oscillator_model(primary_predictor, data, ohlcv_df):
     print("\n" + "=" * 60)
     print("  PHASE 4: Complementary Oscillator Training")
     print("=" * 60)
+def train_oscillator_model(primary_predictor, data, ohlcv_df, osc_arch_type="residual"):
+    """Train the complementary residual oscillator."""
+    print("\n" + "=" * 60)
+    print("  Step 5: Training Complementary Oscillator")
+    print("=" * 60)
     
-    # 1. Compute residuals using the test set of the primary model
-    # (In a real scenario, you'd compute this over the train set to train the oscillator,
-    # but here we'll use the whole dataset for demonstration)
-    
-    # Let's run the whole dataset through the primary model to get max training data for oscillator
+    # 1. Compute residuals over the entire dataset
+    # The oscillator learns to predict the error of the primary model
     if isinstance(data["X_train"], list) and len(data["X_train"]) == 3:
+        # Extended MTL uses a list of 3 inputs
         X_all = [
             np.concatenate([data["X_train"][0], data["X_test"][0]], axis=0),
             np.concatenate([data["X_train"][1], data["X_test"][1]], axis=0),
@@ -350,31 +353,45 @@ def train_oscillator_model(primary_predictor, data, ohlcv_df):
         ]
         y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
         ctx_X_all = None
+        is_extended = True
     else:
         X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
         if isinstance(data["y_train"], dict):
             y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
         else:
             y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
-            
-        if config.DUAL_STREAM:
-            ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
-        else:
-            ctx_X_all = None
-        
+        ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0) if config.DUAL_STREAM else None
+        is_extended = False
+    
     residuals, pred_q = compute_residuals(primary_predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all)
     
-    # 2. Prepare data sequences for the oscillator
+    # 2. Prepare sequences of residuals
     osc_data = prepare_oscillator_data(
-        residuals,
-        pred_q,
+        residuals, pred_q,
         sequence_length=config.OSCILLATOR_SEQ_LEN,
-        train_split=config.TRAIN_TEST_SPLIT
+        train_split=config.TRAIN_TEST_SPLIT,
+        oscillator_type=osc_arch_type,
     )
     
-    # 3. Build and train
-    if isinstance(data["X_train"], list) and len(data["X_train"]) == 3:
+    # 3. Build and train oscillator
+    if is_extended and osc_arch_type == "residual":
         oscillator = FeedbackOscillator(
+            sequence_length=config.OSCILLATOR_SEQ_LEN,
+            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+            dense_units=config.OSCILLATOR_DENSE_UNITS,
+            learning_rate=config.OSCILLATOR_LEARNING_RATE
+        )
+    elif osc_arch_type == "classification":
+        from signal_model import ClassificationOscillator
+        oscillator = ClassificationOscillator(
+            sequence_length=config.OSCILLATOR_SEQ_LEN,
+            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+            dense_units=config.OSCILLATOR_DENSE_UNITS,
+            learning_rate=config.OSCILLATOR_LEARNING_RATE
+        )
+    elif osc_arch_type == "threshold":
+        from signal_model import ThresholdOscillator
+        oscillator = ThresholdOscillator(
             sequence_length=config.OSCILLATOR_SEQ_LEN,
             lstm_units=config.OSCILLATOR_LSTM_UNITS,
             dense_units=config.OSCILLATOR_DENSE_UNITS,
@@ -563,10 +580,48 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=config.EPOCHS, help="Number of epochs to train")
     parser.add_argument("--custom_train", action="store_true", help="Run the custom interactive training function")
     parser.add_argument("--model", type=str, choices=["lstm", "mtl", "extended_mtl"], default="lstm", help="Choose model architecture to use")
+    
+    parser.add_argument("--train-oscillator-only", action="store_true", help="Train only the oscillator on top of an existing primary model")
+    parser.add_argument("--primary-model", type=str, help="Filename of the primary model to attach the oscillator to")
+    parser.add_argument("--oscillator-type", type=str, choices=["residual", "classification", "threshold"], default="residual", help="Type of oscillator to train")
 
     args = parser.parse_args()
 
-    if args.custom_train:
+    if args.train_oscillator_only:
+        if not args.primary_model:
+            print("Error: --primary-model must be provided when using --train-oscillator-only")
+            sys.exit(1)
+            
+        import os
+        import tensorflow as tf
+        model_path = os.path.join(config.MODEL_SAVE_DIR, args.primary_model)
+        if not os.path.exists(model_path):
+            print(f"Error: Primary model not found at {model_path}")
+            sys.exit(1)
+            
+        temp_model = tf.keras.models.load_model(model_path, compile=False)
+        
+        if temp_model.name == "MTLQuaternionPredictor":
+            arch_type = "mtl"
+        elif temp_model.name == "ExtendedMTLPredictor":
+            arch_type = "extended_mtl"
+        else:
+            arch_type = "lstm"
+            
+        primary_predictor = build_primary_model(arch_type)
+        primary_predictor.model = temp_model
+        
+        ohlcv_df = fetch_data()
+        scaled_data, scaler = encode_data(ohlcv_df)
+        data = prepare_data(ohlcv_df, arch_type)
+        
+        # Override config.OSCILLATOR_TYPE so it trains the requested one
+        # Note: train_oscillator_model doesn't take oscillator_type currently, so we'll need to patch it or just set config
+        # Actually wait, I'll update train_oscillator_model signature to accept osc_type
+        train_oscillator_model(primary_predictor, data, ohlcv_df, osc_arch_type=args.oscillator_type)
+        print("\nStandalone oscillator training completed.")
+        
+    elif args.custom_train:
         # Run the standalone function requested by the user
         train_custom_model(epochs=args.epochs, model_type=args.model)
     else:

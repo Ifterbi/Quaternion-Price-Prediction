@@ -7,6 +7,12 @@ export default function Training() {
   const [isTraining, setIsTraining] = useState(false);
   const [modelName, setModelName] = useState("");
   const [oscillatorType, setOscillatorType] = useState("residual");
+  
+  const [availablePrimaryModels, setAvailablePrimaryModels] = useState([]);
+  const [selectedPrimaryModel, setSelectedPrimaryModel] = useState("");
+  const [standaloneOscType, setStandaloneOscType] = useState("classification");
+  const [standaloneOscEpochs, setStandaloneOscEpochs] = useState(10);
+  
   const terminalEndRef = useRef(null);
 
   useEffect(() => {
@@ -21,6 +27,19 @@ export default function Training() {
       setConfig(res.data);
       const dateStr = new Date().toISOString().replace(/T/, '_').replace(/:/g, '').split('.')[0];
       setModelName(`${res.data.MODEL_TYPE}_${dateStr}`);
+    }).catch(console.error);
+
+    // Fetch available models for oscillator fine-tuning
+    axios.get('/api/models').then(res => {
+      const primaryModels = res.data.models
+        .map(m => m.filename)
+        .filter(name => !name.toLowerCase().includes('oscillator') && name.endsWith('.keras'));
+      setAvailablePrimaryModels(primaryModels);
+      if (res.data.active?.primary) {
+        setSelectedPrimaryModel(res.data.active.primary);
+      } else if (primaryModels.length > 0) {
+        setSelectedPrimaryModel(primaryModels[0]);
+      }
     }).catch(console.error);
   }, []);
 
@@ -46,6 +65,15 @@ export default function Training() {
     try {
       const oscEpochs = config.OSCILLATOR_EPOCHS || 10;
       await axios.post(`/api/train?model_type=${config.MODEL_TYPE}&epochs=${config.EPOCHS}&oscillator_epochs=${oscEpochs}&model_name=${modelName}&oscillator_type=${oscillatorType}`, config);
+      setIsTraining(true);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const startOscillatorTraining = async () => {
+    try {
+      await axios.post(`/api/train_oscillator?primary_model_name=${selectedPrimaryModel}&oscillator_type=${standaloneOscType}&epochs=${standaloneOscEpochs}`);
       setIsTraining(true);
     } catch (err) {
       console.error(err);
@@ -141,6 +169,60 @@ export default function Training() {
           ) : (
             <p>Loading config...</p>
           )}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <div className="card-header">
+          <h3>Oscillator Fine-Tuning</h3>
+        </div>
+        <div style={{ padding: '20px' }}>
+          <p style={{ marginBottom: '15px', color: 'var(--text-muted)' }}>
+            Rapidly train a new complementary oscillator on top of an existing primary model.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <div>
+              <label>Primary Model Base: </label>
+              <select 
+                value={selectedPrimaryModel} 
+                onChange={e => setSelectedPrimaryModel(e.target.value)} 
+                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-subtle)', color: 'white', padding: '5px', borderRadius: '4px', width: '100%', marginTop: '5px' }}
+              >
+                {availablePrimaryModels.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Oscillator Architecture: </label>
+              <select 
+                value={standaloneOscType} 
+                onChange={e => setStandaloneOscType(e.target.value)} 
+                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-subtle)', color: 'white', padding: '5px', borderRadius: '4px', width: '100%', marginTop: '5px' }}
+              >
+                <option value="residual">Residual Oscillator (Standard)</option>
+                <option value="classification">Classification Oscillator (Probabilities)</option>
+                <option value="threshold">Threshold Oscillator (Dynamic Cutoffs)</option>
+              </select>
+            </div>
+            <div>
+              <label>Epochs: </label>
+              <input 
+                type="number" 
+                value={standaloneOscEpochs} 
+                onChange={e => setStandaloneOscEpochs(parseInt(e.target.value) || 0)} 
+                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-subtle)', color: 'white', padding: '5px', borderRadius: '4px', width: '100px', marginTop: '5px' }}
+              />
+            </div>
+            <button 
+              className="btn btn-secondary" 
+              onClick={startOscillatorTraining} 
+              disabled={isTraining || !selectedPrimaryModel}
+              style={{ alignSelf: 'flex-start', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              {isTraining ? 'Training in progress...' : 'Train Oscillator Only'}
+            </button>
+          </div>
         </div>
       </div>
 

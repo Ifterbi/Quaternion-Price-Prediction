@@ -649,6 +649,170 @@ async def get_prediction_data(
 
 # ── Training Endpoints ────────────────────────
 
+@app.post("/api/train_oscillator")
+async def start_oscillator_training(
+    epochs: Optional[int] = Query(None, description="Number of epochs to train"),
+    primary_model_name: str = Query(..., description="Name of the primary model to attach to"),
+    oscillator_type: str = Query("classification", description="Type of oscillator to train"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """Start background training for an oscillator standalone."""
+    if TRAINING_STATE["is_training"]:
+        return JSONResponse(status_code=409, content={"error": "Training already in progress"})
+
+    osc_epochs = epochs or config.OSCILLATOR_EPOCHS
+
+    def _train_osc_background():
+        try:
+            TRAINING_STATE["is_training"] = True
+            TRAINING_STATE["phase"] = "oscillator"
+            TRAINING_STATE["epoch"] = 0
+            TRAINING_STATE["total_epochs"] = osc_epochs
+            TRAINING_STATE["history"] = {"loss": [], "val_loss": [], "mae": [], "val_mae": []}
+            TRAINING_STATE["logs"] = [f"[SYSTEM] Starting oscillator-only pipeline..."]
+            TRAINING_STATE["progress_log"] = ""
+            TRAINING_STATE["error"] = None
+
+            # 1. Fetch data
+            TRAINING_STATE["logs"].append("[SYSTEM] Fetching market data...")
+            ohlcv_df = get_ohlcv(fetch_bitcoin_data(
+                ticker_primary=config.TICKER_PRIMARY,
+                ticker_fallback=config.TICKER_FALLBACK,
+                start=config.DEFAULT_START_DATE,
+                interval=config.DEFAULT_INTERVAL,
+            ))
+            
+            # Load Primary Model
+            TRAINING_STATE["logs"].append(f"[SYSTEM] Loading primary model: {primary_model_name}...")
+            model_path = os.path.join(config.MODEL_SAVE_DIR, primary_model_name)
+            temp_model = tf.keras.models.load_model(model_path, compile=False)
+            
+            seq_len = config.SEQUENCE_LENGTH
+            try:
+                input_shape = temp_model.inputs[0].shape
+                if len(input_shape) >= 2 and input_shape[1] is not None:
+                    seq_len = int(input_shape[1])
+            except Exception as e:
+                pass
+                
+            if temp_model.name == "MTLQuaternionPredictor":
+                arch_type = "mtl"
+            elif temp_model.name == "ExtendedMTLPredictor":
+                arch_type = "extended_mtl"
+            else:
+                arch_type = "lstm"
+                
+            primary_predictor = build_primary_model(arch_type)
+            primary_predictor.model = temp_model
+            
+            # Prepare data
+            TRAINING_STATE["logs"].append("[SYSTEM] Preparing data for residuals...")
+            if arch_type == "extended_mtl":
+                data = prepare_extended_training_data(
+                    ohlcv_df, sequence_length=seq_len, train_split=config.TRAIN_TEST_SPLIT
+                )
+                X_all = [
+                    np.concatenate([data["X_train"][0], data["X_test"][0]], axis=0),
+                    np.concatenate([data["X_train"][1], data["X_test"][1]], axis=0),
+                    np.concatenate([data["X_train"][2], data["X_test"][2]], axis=0)
+                ]
+                y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+                ctx_X_all = None
+            else:
+                data = prepare_training_data(
+                    ohlcv_df, sequence_length=seq_len, train_split=config.TRAIN_TEST_SPLIT,
+                    use_path_deltas=False, dual_stream=True,
+                    volume_ma_window=config.VOLUME_MA_WINDOW if config.DUAL_STREAM else 20
+                )
+                X_all = np.concatenate([data["X_train"], data["X_test"]], axis=0)
+                if isinstance(data["y_train"], dict):
+                    y_all = np.concatenate([data["y_train"]["out_main"], data["y_test"]["out_main"]], axis=0)
+                else:
+                    y_all = np.concatenate([data["y_train"], data["y_test"]], axis=0)
+                ctx_X_all = np.concatenate([data["ctx_X_train"], data["ctx_X_test"]], axis=0)
+                
+            # Compute Residuals
+            TRAINING_STATE["logs"].append("[OSCILLATOR] Computing residuals...")
+            residuals, pred_q = compute_residuals(
+                primary_predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all
+            )
+            
+            osc_data = prepare_oscillator_data(
+                residuals, pred_q,
+                sequence_length=config.OSCILLATOR_SEQ_LEN,
+                train_split=config.TRAIN_TEST_SPLIT,
+                oscillator_type=oscillator_type,
+            )
+            
+            TRAINING_STATE["logs"].append(f"[OSCILLATOR] Building {oscillator_type} oscillator...")
+            if arch_type == "extended_mtl" and oscillator_type == "residual":
+                from extended_signal_model import FeedbackOscillator
+                oscillator = FeedbackOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                )
+            elif oscillator_type == "classification":
+                from signal_model import ClassificationOscillator
+                oscillator = ClassificationOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                )
+            elif oscillator_type == "threshold":
+                from signal_model import ThresholdOscillator
+                oscillator = ThresholdOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                )
+            else:
+                oscillator = ResidualOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                )
+                
+            oscillator.build_model()
+            
+            TRAINING_STATE["logs"].append(f"[OSCILLATOR] Starting training — {osc_epochs} epochs")
+            osc_cb = TrainingStateCallback(phase="oscillator")
+            
+            import datetime
+            dateStr = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            save_path = os.path.join(config.MODEL_SAVE_DIR, f"osc_{oscillator_type}_{dateStr}.keras")
+            
+            oscillator.train(
+                osc_data,
+                epochs=osc_epochs,
+                batch_size=config.BATCH_SIZE,
+                validation_split=config.VALIDATION_SPLIT,
+                save_best=True,
+                model_path=save_path,
+                callbacks=[osc_cb]
+            )
+            
+            # Evaluate
+            metrics = oscillator.evaluate(osc_data)
+            metrics_str = ", ".join(f"{k}: {v:.6f}" for k, v in metrics.items())
+            TRAINING_STATE["logs"].append(f"[OSCILLATOR] Test Metrics: {metrics_str}")
+            
+            ACTIVE_MODELS["primary"] = primary_model_name
+            ACTIVE_MODELS["oscillator"] = os.path.basename(save_path)
+            
+            TRAINING_STATE["is_training"] = False
+            TRAINING_STATE["logs"].append("[SYSTEM] Background oscillator training complete.")
+            
+        except Exception as e:
+            logger.exception("Oscillator training pipeline failed")
+            TRAINING_STATE["is_training"] = False
+            TRAINING_STATE["error"] = str(e)
+            TRAINING_STATE["logs"].append(f"[ERROR] {str(e)}")
+            
+    background_tasks.add_task(_train_osc_background)
+    return {"status": "ok", "message": "Oscillator training started in background"}
+
+
 @app.post("/api/train")
 async def start_training(
     epochs: Optional[int] = None,
