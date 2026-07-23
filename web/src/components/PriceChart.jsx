@@ -64,12 +64,25 @@ export default function PriceChart({ data, showSignal = true }) {
   let paddedPBuy = null;
   let paddedPSell = null;
   if (showSignal && signalValues && signalValues.length > 0) {
-    const padLen = data.actual_prices.length - signalValues.length;
+    let trimmedSignals = signalValues;
+    let trimmedPBuy = pBuy;
+    let trimmedPSell = pSell;
+    
+    if (signalValues.length > data.actual_prices.length) {
+        const diff = signalValues.length - data.actual_prices.length;
+        trimmedSignals = signalValues.slice(diff);
+        if (signalType === 'classification') {
+            trimmedPBuy = pBuy.slice(diff);
+            trimmedPSell = pSell.slice(diff);
+        }
+    }
+    
+    const padLen = Math.max(0, data.actual_prices.length - trimmedSignals.length);
     const padArr = new Array(padLen).fill(null);
-    paddedSignals = padArr.concat(signalValues);
+    paddedSignals = padArr.concat(trimmedSignals);
     if (signalType === 'classification') {
-        paddedPBuy = padArr.concat(pBuy);
-        paddedPSell = padArr.concat(pSell);
+        paddedPBuy = padArr.concat(trimmedPBuy);
+        paddedPSell = padArr.concat(trimmedPSell);
     }
   }
 
