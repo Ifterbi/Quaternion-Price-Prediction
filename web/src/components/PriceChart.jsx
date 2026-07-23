@@ -89,6 +89,17 @@ export default function PriceChart({ data, showSignal = true }) {
   const datasets = [];
   const chartDataLength = data.actual_prices.length;
 
+  // Calculate stats for residual highlights if needed
+  let resMean = 0;
+  let resStd = 0;
+  if (signalType === 'residual' && paddedSignals) {
+      const validS = paddedSignals.filter(s => s !== null && s !== undefined);
+      if (validS.length > 0) {
+          resMean = validS.reduce((a, b) => a + b, 0) / validS.length;
+          resStd = Math.sqrt(validS.reduce((a, b) => a + Math.pow(b - resMean, 2), 0) / validS.length);
+      }
+  }
+
   // Add Vertical Highlight Bar Dataset (this goes first to act as a background)
   if (paddedSignals) {
     datasets.push({
@@ -108,8 +119,9 @@ export default function PriceChart({ data, showSignal = true }) {
              if (s <= sellThresh) return 'rgba(239, 68, 68, 0.15)'; // Red
              return 'rgba(234, 179, 8, 0.15)'; // Yellow
         } else {
-             if (s === 0) return 'rgba(234, 179, 8, 0.15)'; // Yellow
-             return s < 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)'; // Red for sell, Green for buy
+             if (s > resMean + resStd * 0.5) return 'rgba(34, 197, 94, 0.15)'; // Green
+             if (s < resMean - resStd * 0.5) return 'rgba(239, 68, 68, 0.15)'; // Red
+             return 'rgba(234, 179, 8, 0.15)'; // Yellow
         }
       }),
       borderWidth: 0,
