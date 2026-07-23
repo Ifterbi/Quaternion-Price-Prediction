@@ -145,6 +145,7 @@ export default function Training() {
                 >
                   <option value="residual">Residual Oscillator (Standard)</option>
                   <option value="classification">Classification Oscillator (Probabilities)</option>
+                  <option value="self_learning">Self-Learning Oscillator (Max Profit)</option>
                   <option value="threshold">Threshold Oscillator (Dynamic Cutoffs)</option>
                 </select>
               </div>
@@ -202,6 +203,7 @@ export default function Training() {
               >
                 <option value="residual">Residual Oscillator (Standard)</option>
                 <option value="classification">Classification Oscillator (Probabilities)</option>
+                <option value="self_learning">Self-Learning Oscillator (Max Profit)</option>
                 <option value="threshold">Threshold Oscillator (Dynamic Cutoffs)</option>
               </select>
             </div>

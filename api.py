@@ -765,12 +765,19 @@ async def start_oscillator_training(
                 primary_predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all
             )
             
-            osc_data = prepare_oscillator_data(
-                residuals, pred_q,
-                sequence_length=config.OSCILLATOR_SEQ_LEN,
-                train_split=config.TRAIN_TEST_SPLIT,
-                oscillator_type=oscillator_type,
-            )
+            if oscillator_type == "self_learning":
+                osc_data = prepare_oscillator_training_data(
+                    ohlcv_df,
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    train_split=config.TRAIN_TEST_SPLIT
+                )
+            else:
+                osc_data = prepare_oscillator_data(
+                    residuals, pred_q,
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    train_split=config.TRAIN_TEST_SPLIT,
+                    oscillator_type=oscillator_type,
+                )
             
             TRAINING_STATE["logs"].append(f"[OSCILLATOR] Building {oscillator_type} oscillator...")
             if arch_type == "extended_mtl" and oscillator_type == "residual":
@@ -790,6 +797,13 @@ async def start_oscillator_training(
             elif oscillator_type == "threshold":
                 from signal_model import ThresholdOscillator
                 oscillator = ThresholdOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                )
+            elif oscillator_type == "self_learning":
+                from signal_model import SelfLearningOscillator
+                oscillator = SelfLearningOscillator(
                     sequence_length=config.OSCILLATOR_SEQ_LEN,
                     lstm_units=config.OSCILLATOR_LSTM_UNITS,
                     dense_units=config.OSCILLATOR_DENSE_UNITS,
@@ -962,12 +976,19 @@ async def start_training(
                 predictor, X_all, y_all, data["scaler"], ctx_X_test=ctx_X_all
             )
 
-            osc_data = prepare_oscillator_data(
-                residuals, pred_q,
-                sequence_length=config.OSCILLATOR_SEQ_LEN,
-                train_split=config.TRAIN_TEST_SPLIT,
-                oscillator_type=osc_arch_type,
-            )
+            if osc_arch_type == "self_learning":
+                osc_data = prepare_oscillator_training_data(
+                    ohlcv_df,
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    train_split=config.TRAIN_TEST_SPLIT
+                )
+            else:
+                osc_data = prepare_oscillator_data(
+                    residuals, pred_q,
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    train_split=config.TRAIN_TEST_SPLIT,
+                    oscillator_type=osc_arch_type,
+                )
 
             if arch_type == "extended_mtl" and osc_arch_type == "residual":
                 from extended_signal_model import FeedbackOscillator
@@ -988,6 +1009,14 @@ async def start_training(
             elif osc_arch_type == "threshold":
                 from signal_model import ThresholdOscillator
                 oscillator = ThresholdOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                    learning_rate=config.OSCILLATOR_LEARNING_RATE,
+                )
+            elif osc_arch_type == "self_learning":
+                from signal_model import SelfLearningOscillator
+                oscillator = SelfLearningOscillator(
                     sequence_length=config.OSCILLATOR_SEQ_LEN,
                     lstm_units=config.OSCILLATOR_LSTM_UNITS,
                     dense_units=config.OSCILLATOR_DENSE_UNITS,
