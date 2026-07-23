@@ -6,6 +6,7 @@ export default function Training() {
   const [status, setStatus] = useState(null);
   const [isTraining, setIsTraining] = useState(false);
   const [modelName, setModelName] = useState("");
+  const [oscillatorType, setOscillatorType] = useState("residual");
   const terminalEndRef = useRef(null);
 
   useEffect(() => {
@@ -44,7 +45,7 @@ export default function Training() {
   const startTraining = async () => {
     try {
       const oscEpochs = config.OSCILLATOR_EPOCHS || 10;
-      await axios.post(`/api/train?model_type=${config.MODEL_TYPE}&epochs=${config.EPOCHS}&oscillator_epochs=${oscEpochs}&model_name=${modelName}`, config);
+      await axios.post(`/api/train?model_type=${config.MODEL_TYPE}&epochs=${config.EPOCHS}&oscillator_epochs=${oscEpochs}&model_name=${modelName}&oscillator_type=${oscillatorType}`, config);
       setIsTraining(true);
     } catch (err) {
       console.error(err);
@@ -105,6 +106,18 @@ export default function Training() {
                   <option value="lstm">Single-Stream LSTM</option>
                   <option value="mtl">Multi-Task Learning (MTL)</option>
                   <option value="extended_mtl">Extended MTL (Momentum-Rotation)</option>
+                </select>
+              </div>
+              <div>
+                <label>Oscillator Architecture: </label>
+                <select 
+                  value={oscillatorType} 
+                  onChange={e => setOscillatorType(e.target.value)} 
+                  style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-subtle)', color: 'white', padding: '5px', borderRadius: '4px', width: '100%', marginTop: '5px' }}
+                >
+                  <option value="residual">Residual Oscillator (Standard)</option>
+                  <option value="classification">Classification Oscillator (Probabilities)</option>
+                  <option value="threshold">Threshold Oscillator (Dynamic Cutoffs)</option>
                 </select>
               </div>
               <div>

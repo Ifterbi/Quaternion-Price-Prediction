@@ -109,7 +109,13 @@ export default function Dashboard() {
             <MetricCard label="MAE" value={primaryMetrics?.MAE ? primaryMetrics.MAE.toFixed(4) : '—'} />
             <MetricCard 
               label="Future Signal" 
-              value={data.next_signal !== undefined ? data.next_signal.toFixed(4) : '—'} 
+              value={
+                  data.next_signal !== undefined 
+                      ? (typeof data.next_signal === 'number' 
+                          ? data.next_signal.toFixed(4) 
+                          : data.next_signal.value.toFixed(4))
+                      : '—'
+              } 
             />
           </div>
 

@@ -186,6 +186,102 @@ class ResidualOscillator:
         return buffer.getvalue()
 
 
+class ClassificationOscillator(ResidualOscillator):
+    """Predicts probabilities of [SELL, HOLD, BUY]."""
+    
+    def build_model(self) -> Model:
+        res_input = Input(shape=(self.sequence_length, 1), name="residual_seq")
+        h_res = LSTM(self.lstm_units, return_sequences=False, name="residual_lstm")(res_input)
+        h_res = Dropout(0.2, name="residual_dropout")(h_res)
+        
+        q_input = Input(shape=(4,), name="next_quaternion")
+        merged = Concatenate(name="concat_features")([h_res, q_input])
+        dense = Dense(self.dense_units, activation="relu", name="dense_1")(merged)
+        
+        # 3 classes: 0 (Sell), 1 (Hold), 2 (Buy)
+        output = Dense(3, activation="softmax", name="oscillator_out")(dense)
+        
+        model = Model(inputs=[res_input, q_input], outputs=output, name="ClassificationOscillator")
+        optimizer = Adam(learning_rate=self.learning_rate)
+        model.compile(
+            optimizer=optimizer,
+            loss="sparse_categorical_crossentropy",
+            metrics=["accuracy"]
+        )
+        self.model = model
+        return model
+
+@keras.saving.register_keras_serializable()
+class DynamicThresholdLayer(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
+    def build(self, input_shape):
+        self.buy_threshold = self.add_weight(name="buy_threshold", shape=(), initializer=tf.constant_initializer(0.5), trainable=True)
+        self.sell_threshold = self.add_weight(name="sell_threshold", shape=(), initializer=tf.constant_initializer(-0.5), trainable=True)
+        super().build(input_shape)
+        
+    def call(self, inputs):
+        osc_val = inputs
+        # We output the osc_val along with the thresholds repeated for the batch
+        batch_size = tf.shape(osc_val)[0]
+        buy_t = tf.fill([batch_size, 1], self.buy_threshold)
+        sell_t = tf.fill([batch_size, 1], self.sell_threshold)
+        return tf.concat([osc_val, buy_t, sell_t], axis=-1)
+
+@keras.saving.register_keras_serializable()
+def profit_loss(y_true, y_pred):
+    """
+    Custom loss that penalizes missed profit.
+    y_true is the continuous future change.
+    y_pred is [osc_val, buy_thresh, sell_thresh]
+    """
+    osc_val = y_pred[:, 0:1]
+    buy_t = y_pred[:, 1:2]
+    sell_t = y_pred[:, 2:3]
+    
+    # Soft trade signals using sigmoid to keep it differentiable
+    # 1 if osc_val > buy_t, 0 otherwise
+    buy_signal = tf.sigmoid((osc_val - buy_t) * 10.0)
+    # 1 if osc_val < sell_t, 0 otherwise
+    sell_signal = tf.sigmoid((sell_t - osc_val) * 10.0)
+    
+    # Trade signal: 1 (long), -1 (short), 0 (hold)
+    trade_signal = buy_signal - sell_signal
+    
+    # We want to maximize (trade_signal * y_true), so we minimize its negative
+    profit = trade_signal * y_true
+    
+    # We add a small MSE term to keep osc_val bounded
+    mse = tf.square(y_true - osc_val)
+    
+    return -tf.reduce_mean(profit) + 0.1 * tf.reduce_mean(mse)
+
+class ThresholdOscillator(ResidualOscillator):
+    """Predicts continuous value and dynamically learned thresholds."""
+    
+    def build_model(self) -> Model:
+        res_input = Input(shape=(self.sequence_length, 1), name="residual_seq")
+        h_res = LSTM(self.lstm_units, return_sequences=False, name="residual_lstm")(res_input)
+        h_res = Dropout(0.2, name="residual_dropout")(h_res)
+        
+        q_input = Input(shape=(4,), name="next_quaternion")
+        merged = Concatenate(name="concat_features")([h_res, q_input])
+        dense = Dense(self.dense_units, activation="relu", name="dense_1")(merged)
+        
+        osc_val = Dense(1, activation="tanh", name="raw_oscillator")(dense)
+        output = DynamicThresholdLayer(name="oscillator_out")(osc_val)
+        
+        model = Model(inputs=[res_input, q_input], outputs=output, name="ThresholdOscillator")
+        optimizer = Adam(learning_rate=self.learning_rate)
+        model.compile(
+            optimizer=optimizer,
+            loss=profit_loss,
+            metrics=["mae"]
+        )
+        self.model = model
+        return model
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     

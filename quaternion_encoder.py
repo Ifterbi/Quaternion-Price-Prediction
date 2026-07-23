@@ -497,6 +497,7 @@ def prepare_oscillator_data(
     pred_q: np.ndarray,
     sequence_length: int = 14,
     train_split: float = 0.8,
+    oscillator_type: str = "residual",
 ) -> Dict[str, np.ndarray]:
     """Prepare sliding window sequences for the oscillator model.
 
@@ -528,7 +529,14 @@ def prepare_oscillator_data(
     std_delta = std_delta if std_delta > 1e-12 else 1.0
     
     # Target is the momentum of the divergence
-    targets = np.tanh((delta_residuals - mean_delta) / std_delta)
+    if oscillator_type == "classification":
+        # Classes: 0 (Sell), 1 (Hold), 2 (Buy)
+        targets = np.ones_like(delta_residuals) # Default to Hold
+        targets[delta_residuals < mean_delta - std_delta * 0.5] = 0 # Sell
+        targets[delta_residuals > mean_delta + std_delta * 0.5] = 2 # Buy
+    else:
+        # Continuous target for residual and threshold types
+        targets = np.tanh((delta_residuals - mean_delta) / std_delta)
     
     if config.MEAN_CENTER_OSCILLATOR:
         logger.info("Mean-centering divergence momentum (subtracted %.4f)", mean_delta)

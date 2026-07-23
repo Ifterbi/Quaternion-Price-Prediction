@@ -38,14 +38,43 @@ const CHART_COLORS = [
 export default function PriceChart({ data, showSignal = true }) {
   if (!data || !data.dates || !data.actual_prices) return <p>No chart data available</p>;
 
+  let signalValues = [];
+  let signalType = 'residual';
+  let buyThresh = null;
+  let sellThresh = null;
+  let pBuy = [];
+  let pSell = [];
+
+  const rawSignals = data.signals;
+  if (Array.isArray(rawSignals)) {
+      signalValues = rawSignals;
+  } else if (rawSignals && rawSignals.type) {
+      signalType = rawSignals.type;
+      signalValues = rawSignals.values || [];
+      if (signalType === 'threshold') {
+          buyThresh = rawSignals.buy_threshold;
+          sellThresh = rawSignals.sell_threshold;
+      } else if (signalType === 'classification') {
+          pBuy = rawSignals.p_buy || [];
+          pSell = rawSignals.p_sell || [];
+      }
+  }
+
   let paddedSignals = null;
-  if (showSignal && data.signals && data.signals.length > 0) {
-    paddedSignals = new Array(data.actual_prices.length - data.signals.length)
-      .fill(null)
-      .concat(data.signals);
+  let paddedPBuy = null;
+  let paddedPSell = null;
+  if (showSignal && signalValues && signalValues.length > 0) {
+    const padLen = data.actual_prices.length - signalValues.length;
+    const padArr = new Array(padLen).fill(null);
+    paddedSignals = padArr.concat(signalValues);
+    if (signalType === 'classification') {
+        paddedPBuy = padArr.concat(pBuy);
+        paddedPSell = padArr.concat(pSell);
+    }
   }
 
   const datasets = [];
+  const chartDataLength = data.actual_prices.length;
 
   // Add Vertical Highlight Bar Dataset (this goes first to act as a background)
   if (paddedSignals) {
@@ -53,10 +82,22 @@ export default function PriceChart({ data, showSignal = true }) {
       type: 'bar',
       label: 'Signal Highlight',
       data: paddedSignals.map(s => (s !== null && s !== undefined) ? 1 : 0),
-      backgroundColor: paddedSignals.map(s => {
+      backgroundColor: paddedSignals.map((s, idx) => {
         if (s === null || s === undefined) return 'transparent';
-        if (s === 0) return 'rgba(234, 179, 8, 0.15)'; // Yellow
-        return s < 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)'; // Red for sell, Green for buy
+        if (signalType === 'classification') {
+             const pb = paddedPBuy[idx];
+             const ps = paddedPSell[idx];
+             if (pb > ps && pb > 0.4) return 'rgba(34, 197, 94, 0.15)'; // Green
+             if (ps > pb && ps > 0.4) return 'rgba(239, 68, 68, 0.15)'; // Red
+             return 'rgba(234, 179, 8, 0.15)'; // Yellow
+        } else if (signalType === 'threshold') {
+             if (s >= buyThresh) return 'rgba(34, 197, 94, 0.15)'; // Green
+             if (s <= sellThresh) return 'rgba(239, 68, 68, 0.15)'; // Red
+             return 'rgba(234, 179, 8, 0.15)'; // Yellow
+        } else {
+             if (s === 0) return 'rgba(234, 179, 8, 0.15)'; // Yellow
+             return s < 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)'; // Red for sell, Green for buy
+        }
       }),
       borderWidth: 0,
       yAxisID: 'y_highlight',
@@ -106,6 +147,27 @@ export default function PriceChart({ data, showSignal = true }) {
       tension: 0.1,
       yAxisID: 'y1', // Secondary axis
     });
+
+    if (signalType === 'threshold') {
+      datasets.push({
+          label: 'Buy Threshold',
+          data: new Array(chartDataLength).fill(buyThresh),
+          borderColor: 'rgba(34, 197, 94, 0.5)',
+          borderWidth: 1,
+          borderDash: [2, 2],
+          pointRadius: 0,
+          yAxisID: 'y1'
+      });
+      datasets.push({
+          label: 'Sell Threshold',
+          data: new Array(chartDataLength).fill(sellThresh),
+          borderColor: 'rgba(239, 68, 68, 0.5)',
+          borderWidth: 1,
+          borderDash: [2, 2],
+          pointRadius: 0,
+          yAxisID: 'y1'
+      });
+    }
   }
 
   const chartData = {

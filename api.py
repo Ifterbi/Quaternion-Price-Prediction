@@ -509,25 +509,81 @@ async def get_prediction_data(
                         primary_predictor, X_all, y_all, global_scaler, ctx_X_test=ctx_X_all
                     )
     
+                    temp_osc = tf.keras.models.load_model(osc_path, compile=False)
+                    osc_type_name = temp_osc.name
+
+                    # Determine internal type string based on model name
+                    if osc_type_name == "ClassificationOscillator":
+                        internal_osc_type = "classification"
+                    elif osc_type_name == "ThresholdOscillator":
+                        internal_osc_type = "threshold"
+                    elif osc_type_name == "FeedbackOscillator":
+                        internal_osc_type = "residual" # fallback for feedback
+                    else:
+                        internal_osc_type = "residual"
+
                     osc_data = prepare_oscillator_data(
                         residuals, pred_q,
                         sequence_length=config.OSCILLATOR_SEQ_LEN,
                         train_split=config.TRAIN_TEST_SPLIT,
+                        oscillator_type=internal_osc_type,
                     )
     
-                    oscillator = ResidualOscillator(
-                        sequence_length=config.OSCILLATOR_SEQ_LEN,
-                        lstm_units=config.OSCILLATOR_LSTM_UNITS,
-                        dense_units=config.OSCILLATOR_DENSE_UNITS,
-                        learning_rate=config.OSCILLATOR_LEARNING_RATE,
-                    )
-                    oscillator.build_model()
-                    oscillator.model.load_weights(osc_path)
+                    if internal_osc_type == "classification":
+                        from signal_model import ClassificationOscillator
+                        oscillator = ClassificationOscillator(
+                            sequence_length=config.OSCILLATOR_SEQ_LEN,
+                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                            dense_units=config.OSCILLATOR_DENSE_UNITS,
+                        )
+                    elif internal_osc_type == "threshold":
+                        from signal_model import ThresholdOscillator
+                        oscillator = ThresholdOscillator(
+                            sequence_length=config.OSCILLATOR_SEQ_LEN,
+                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                            dense_units=config.OSCILLATOR_DENSE_UNITS,
+                        )
+                    elif osc_type_name == "FeedbackOscillator":
+                        from extended_signal_model import FeedbackOscillator
+                        oscillator = FeedbackOscillator(
+                            sequence_length=config.OSCILLATOR_SEQ_LEN,
+                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                            dense_units=config.OSCILLATOR_DENSE_UNITS,
+                        )
+                    else:
+                        oscillator = ResidualOscillator(
+                            sequence_length=config.OSCILLATOR_SEQ_LEN,
+                            lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                            dense_units=config.OSCILLATOR_DENSE_UNITS,
+                        )
+                    
+                    oscillator.model = temp_osc
     
                     test_signals = oscillator.predict(
                         osc_data["X_res_test"], osc_data["X_q_test"]
                     )
-                    signals = test_signals.flatten().tolist()
+                    
+                    if internal_osc_type == "classification":
+                        # Output format: {"type": "classification", "values": [...], "p_buy": [...], "p_sell": [...]}
+                        signals = {
+                            "type": "classification",
+                            "values": [round(float(p[2] - p[0]), 4) for p in test_signals], # P(Buy) - P(Sell)
+                            "p_buy": [round(float(p[2]), 4) for p in test_signals],
+                            "p_sell": [round(float(p[0]), 4) for p in test_signals],
+                            "p_hold": [round(float(p[1]), 4) for p in test_signals]
+                        }
+                    elif internal_osc_type == "threshold":
+                        signals = {
+                            "type": "threshold",
+                            "values": [round(float(p[0]), 4) for p in test_signals],
+                            "buy_threshold": round(float(test_signals[-1, 1]), 4) if len(test_signals) > 0 else 0.5,
+                            "sell_threshold": round(float(test_signals[-1, 2]), 4) if len(test_signals) > 0 else -0.5,
+                        }
+                    else:
+                        signals = {
+                            "type": "residual",
+                            "values": [round(float(s), 4) for s in test_signals.flatten()]
+                        }
     
                     # Next signal
                     if m_mod_type == "extended_mtl":
@@ -548,10 +604,25 @@ async def get_prediction_data(
     
                     recent_residuals = residuals[-config.OSCILLATOR_SEQ_LEN:]
                     recent_residuals = recent_residuals.reshape(1, config.OSCILLATOR_SEQ_LEN, 1).astype(np.float32)
-                    next_signal = float(oscillator.predict(recent_residuals, next_q)[0, 0])
+                    next_raw = oscillator.predict(recent_residuals, next_q)
+                    if isinstance(signals, dict) and signals["type"] == "classification":
+                        next_signal = {
+                            "value": float(next_raw[0, 2] - next_raw[0, 0]),
+                            "p_buy": float(next_raw[0, 2]),
+                            "p_sell": float(next_raw[0, 0]),
+                            "p_hold": float(next_raw[0, 1]),
+                        }
+                    elif isinstance(signals, dict) and signals["type"] == "threshold":
+                        next_signal = {
+                            "value": float(next_raw[0, 0]),
+                            "buy_threshold": float(next_raw[0, 1]),
+                            "sell_threshold": float(next_raw[0, 2]),
+                        }
+                    else:
+                        next_signal = float(next_raw[0, 0])
                 except Exception as e:
                     logger.warning("Oscillator inference failed: %s", e, exc_info=True)
-                    signals = []
+                    signals = {"type": "residual", "values": []}
                     next_signal = 0.0
 
         # 8. Prepare dates
@@ -565,8 +636,8 @@ async def get_prediction_data(
             "dates": dates,
             "actual_prices": [round(float(p), 4) for p in actual_prices],
             "model_predictions": model_predictions,
-            "signals": [round(float(s), 4) for s in signals],
-            "next_signal": round(float(next_signal), 4),
+            "signals": signals,
+            "next_signal": next_signal,
             "data_points": len(ohlcv_df),
             "test_points": len(actual_prices),
         }
@@ -584,6 +655,7 @@ async def start_training(
     oscillator_epochs: Optional[int] = None,
     model_name: Optional[str] = Query("best_model", description="Base name for saved models"),
     model_type: Optional[str] = Query(None, description="Model architecture type"),
+    oscillator_type: Optional[str] = Query("residual", description="Oscillator architecture type"),
 ):
     """Start background training for both primary and oscillator models."""
     if TRAINING_STATE["is_training"]:
@@ -592,6 +664,7 @@ async def start_training(
     train_epochs = epochs or config.EPOCHS
     osc_epochs = oscillator_epochs or config.OSCILLATOR_EPOCHS
     arch_type = model_type or config.MODEL_TYPE
+    osc_arch_type = oscillator_type or "residual"
 
     def _train_background():
         try:
@@ -701,11 +774,28 @@ async def start_training(
                 residuals, pred_q,
                 sequence_length=config.OSCILLATOR_SEQ_LEN,
                 train_split=config.TRAIN_TEST_SPLIT,
+                oscillator_type=osc_arch_type,
             )
 
-            if arch_type == "extended_mtl":
+            if arch_type == "extended_mtl" and osc_arch_type == "residual":
                 from extended_signal_model import FeedbackOscillator
                 oscillator = FeedbackOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                    learning_rate=config.OSCILLATOR_LEARNING_RATE,
+                )
+            elif osc_arch_type == "classification":
+                from signal_model import ClassificationOscillator
+                oscillator = ClassificationOscillator(
+                    sequence_length=config.OSCILLATOR_SEQ_LEN,
+                    lstm_units=config.OSCILLATOR_LSTM_UNITS,
+                    dense_units=config.OSCILLATOR_DENSE_UNITS,
+                    learning_rate=config.OSCILLATOR_LEARNING_RATE,
+                )
+            elif osc_arch_type == "threshold":
+                from signal_model import ThresholdOscillator
+                oscillator = ThresholdOscillator(
                     sequence_length=config.OSCILLATOR_SEQ_LEN,
                     lstm_units=config.OSCILLATOR_LSTM_UNITS,
                     dense_units=config.OSCILLATOR_DENSE_UNITS,
