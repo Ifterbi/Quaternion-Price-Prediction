@@ -102,8 +102,15 @@ class ExtendedMTLPredictor(mtl_model.MultiTaskQuaternionPredictor):
         # Form the rotation quaternion Q_rot
         q_rot = Concatenate(name="q_rot_synthesis")([mom_w, mom_x, mom_y, mom_z])
         
-        # Calculate Q_next = Q_current * Q_rot
-        out_main = QuaternionHamiltonProductLayer(name="out_main")([q_current, q_rot])
+        # Feature Injection: Concatenate Q_rot with shared_state and Q_current
+        # We let the network learn how to apply the predicted momentum to the current state
+        injected_features = Concatenate(name="momentum_injection")([shared_state, q_current, q_rot])
+        
+        # Process the injected features through a dense layer
+        h_main = Dense(self.aux_dense_units, activation="relu", name="dense_main_fusion")(injected_features)
+        
+        # Final absolute prediction out_main
+        out_main = Dense(4, activation="linear", name="out_main")(h_main)
 
         # --- Model Assembly & Compilation ---
         model = Model(
